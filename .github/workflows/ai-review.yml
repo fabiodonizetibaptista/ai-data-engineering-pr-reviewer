@@ -11,6 +11,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
+      - name: List repository root files
+        run: ls -la
+
       - name: Show pull request context
         run: |
           echo "Repository: ${{ github.repository }}"
