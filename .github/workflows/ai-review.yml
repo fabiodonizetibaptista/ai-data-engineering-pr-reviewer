@@ -4,9 +4,13 @@ on:
   workflow_call:
 
 jobs:
-  placeholder:
+  ai-review:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Placeholder
-        run: echo "AI Data Engineering Reviewer iniciado"
+      - name: Show pull request context
+        run: |
+          echo "Repository: ${{ github.repository }}"
+          echo "Pull Request: #${{ github.event.pull_request.number }}"
+          echo "Base branch: ${{ github.event.pull_request.base.ref }}"
+          echo "Head branch: ${{ github.event.pull_request.head.ref }}"
