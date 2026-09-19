@@ -1,0 +1,12 @@
+name: Reusable AI Data Engineering Review
+
+on:
+  workflow_call:
+
+jobs:
+  placeholder:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Placeholder
+        run: echo "AI Data Engineering Reviewer iniciado"
