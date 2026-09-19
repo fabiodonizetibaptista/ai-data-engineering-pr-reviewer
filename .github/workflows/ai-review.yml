@@ -22,11 +22,16 @@ jobs:
             "${{ github.event.pull_request.base.sha }}" \
             "${{ github.event.pull_request.head.sha }}"
 
-      - name: Show pull request diff
+      - name: Prepare pull request diff
         run: |
           git diff \
             "${{ github.event.pull_request.base.sha }}" \
-            "${{ github.event.pull_request.head.sha }}"
+            "${{ github.event.pull_request.head.sha }}" \
+            > /tmp/pr.diff
+
+          echo "Pull request diff generated successfully."
+          echo "Diff lines: $(wc -l < /tmp/pr.diff)"
+          echo "Diff size (bytes): $(wc -c < /tmp/pr.diff)"
 
       - name: Show pull request context
         run: |
