@@ -40,6 +40,9 @@ jobs:
           echo "Diff lines: $(wc -l < /tmp/pr.diff)"
           echo "Diff size (bytes): $(wc -c < /tmp/pr.diff)"
 
+      - name: Run AI reviewer
+        run: python3 .ai-reviewer/src/reviewer.py
+
       - name: Show pull request context
         run: |
           echo "Repository: ${{ github.repository }}"
