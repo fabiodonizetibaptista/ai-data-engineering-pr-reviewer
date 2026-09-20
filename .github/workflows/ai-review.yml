@@ -13,6 +13,13 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Checkout AI reviewer
+        uses: actions/checkout@v7
+        with:
+          repository: fabiodonizetibaptista/ai-data-engineering-pr-reviewer
+          ref: main
+          path: .ai-reviewer
+
       - name: List repository root files
         run: ls -la
 
