@@ -2,6 +2,9 @@ name: Reusable AI Data Engineering Review
 
 on:
   workflow_call:
+    secrets:
+      GEMINI_API_KEY:
+        required: true
 
 jobs:
   ai-review:
