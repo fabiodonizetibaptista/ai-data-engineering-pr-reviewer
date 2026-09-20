@@ -44,6 +44,8 @@ jobs:
           echo "Diff size (bytes): $(wc -c < /tmp/pr.diff)"
 
       - name: Run AI reviewer
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: python3 .ai-reviewer/src/reviewer.py
 
       - name: Show pull request context

@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 
@@ -13,14 +14,13 @@ RULES_PATH = Path(".ai-reviewer/rules/data-engineering.md")
 
 def main() -> None:
     """
-    Valida se o diff do Pull Request e as regras de revisão estão
-    disponíveis para o reviewer.
+    Valida se os insumos necessários para o reviewer estão disponíveis.
 
-    Nesta etapa ainda não executamos nenhuma análise com IA.
-    Apenas confirmamos que o programa consegue acessar com segurança
-    os dois insumos principais da futura revisão:
-    1. o que mudou no Pull Request;
-    2. quais critérios devem ser usados na avaliação.
+    Nesta etapa ainda não executamos nenhuma chamada de IA.
+    Apenas confirmamos que o programa consegue acessar:
+    1. o diff do Pull Request;
+    2. as regras de revisão;
+    3. a chave da API da Gemini via variável de ambiente.
     """
 
     if not DIFF_PATH.exists():
@@ -43,6 +43,13 @@ def main() -> None:
         errors="replace",
     )
 
+    gemini_api_key = os.getenv("GEMINI_API_KEY")
+
+    if not gemini_api_key:
+        raise RuntimeError(
+            "GEMINI_API_KEY environment variable is not available."
+        )
+
     diff_lines = len(diff.splitlines())
     diff_size_bytes = DIFF_PATH.stat().st_size
 
@@ -51,6 +58,7 @@ def main() -> None:
     print(f"Diff lines: {diff_lines}")
     print(f"Diff size (bytes): {diff_size_bytes}")
     print(f"Review rules available: {bool(rules.strip())}")
+    print("Gemini API key available: True")
 
 
 if __name__ == "__main__":
