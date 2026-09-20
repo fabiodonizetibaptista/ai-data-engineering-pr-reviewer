@@ -58,6 +58,12 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: python3 .ai-reviewer/src/reviewer.py
 
+      - name: Upload AI review artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-data-engineering-review
+          path: /tmp/ai-review.md
+
       - name: Show pull request context
         run: |
           echo "Repository: ${{ github.repository }}"
