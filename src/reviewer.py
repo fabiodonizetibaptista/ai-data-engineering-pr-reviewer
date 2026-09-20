@@ -1,4 +1,7 @@
+import json
 import os
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 from google import genai
@@ -180,6 +183,103 @@ def generate_review(
         )
 
     return review
+
+def publish_pull_request_review(
+    github_token: str,
+    review: str,
+) -> None:
+    """
+    Publica o resultado da análise como um review do tipo COMMENT
+    no Pull Request atual.
+
+    A IA não aprova nem bloqueia o PR automaticamente.
+    A decisão final continua pertencendo ao desenvolvedor.
+    """
+
+    repository = os.getenv("GITHUB_REPOSITORY")
+    event_path = os.getenv("GITHUB_EVENT_PATH")
+
+    if not repository:
+        raise RuntimeError(
+            "GITHUB_REPOSITORY environment variable is not available."
+        )
+
+    if not event_path:
+        raise RuntimeError(
+            "GITHUB_EVENT_PATH environment variable is not available."
+        )
+
+    event_file = Path(event_path)
+
+    if not event_file.exists():
+        raise FileNotFoundError(
+            f"GitHub event file not found at: {event_file}"
+        )
+
+    event = json.loads(
+        event_file.read_text(
+            encoding="utf-8",
+        )
+    )
+
+    pull_request = event.get("pull_request")
+
+    if not pull_request:
+        raise RuntimeError(
+            "The current GitHub event does not contain a Pull Request."
+        )
+
+    pull_request_number = pull_request["number"]
+
+    url = (
+        f"https://api.github.com/repos/{repository}"
+        f"/pulls/{pull_request_number}/reviews"
+    )
+
+    payload = json.dumps(
+        {
+            "body": review,
+            "event": "COMMENT",
+        }
+    ).encode("utf-8")
+
+    request = urllib.request.Request(
+        url=url,
+        data=payload,
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {github_token}",
+            "Accept": "application/vnd.github+json",
+            "Content-Type": "application/json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        },
+    )
+
+    try:
+        with urllib.request.urlopen(
+            request,
+            timeout=30,
+        ) as response:
+            if response.status not in (200, 201):
+                raise RuntimeError(
+                    "GitHub returned an unexpected status "
+                    f"while publishing the review: {response.status}"
+                )
+
+    except urllib.error.HTTPError as exc:
+        # Não exibimos body nem headers da resposta para evitar
+        # vazamento acidental de informações nos logs.
+        raise RuntimeError(
+            "Failed to publish Pull Request review "
+            f"(GitHub HTTP {exc.code})."
+        ) from None
+
+    except urllib.error.URLError:
+        raise RuntimeError(
+            "Failed to connect to GitHub while publishing the review."
+        ) from None
+
+    print("Pull Request review published successfully.")
 
 
 def main() -> None:
