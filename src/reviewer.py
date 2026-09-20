@@ -1,6 +1,8 @@
 import os
 from pathlib import Path
 
+from google import genai
+
 
 # O workflow gera o diff do Pull Request neste arquivo temporário.
 # Mantemos o conteúdo fora dos logs para evitar exposição acidental
@@ -11,16 +13,49 @@ DIFF_PATH = Path("/tmp/pr.diff")
 # As regras de revisão ficam versionadas separadamente do código Python.
 RULES_PATH = Path(".ai-reviewer/rules/data-engineering.md")
 
+# Modelo utilizado pelo reviewer.
+MODEL = "gemini-3.8-flash"
+
+
+def check_gemini_connection(api_key: str) -> None:
+    """
+    Executa uma chamada mínima à Gemini para validar:
+
+    - autenticação;
+    - disponibilidade da API;
+    - disponibilidade do modelo configurado.
+
+    Nesta etapa nenhum código do Pull Request é enviado ao modelo.
+    """
+
+    client = genai.Client(api_key=api_key)
+
+    try:
+        interaction = client.interactions.create(
+            model=MODEL,
+            input="Reply only with OK.",
+        )
+    except Exception as exc:
+        # Não exibimos a mensagem completa da exceção para reduzir o risco
+        # de informações sensíveis aparecerem nos logs do workflow.
+        raise RuntimeError(
+            f"Gemini API health check failed ({type(exc).__name__})."
+        ) from None
+
+    if not interaction.output_text:
+        raise RuntimeError(
+            "Gemini API health check returned an empty response."
+        )
+
+    print("Gemini API connection: OK")
+
 
 def main() -> None:
     """
-    Valida se os insumos necessários para o reviewer estão disponíveis.
+    Valida os insumos necessários para o reviewer e testa a conexão
+    com a Gemini.
 
-    Nesta etapa ainda não executamos nenhuma chamada de IA.
-    Apenas confirmamos que o programa consegue acessar:
-    1. o diff do Pull Request;
-    2. as regras de revisão;
-    3. a chave da API da Gemini via variável de ambiente.
+    Nesta etapa ainda NÃO enviamos o diff ou as regras para a IA.
     """
 
     if not DIFF_PATH.exists():
@@ -59,6 +94,8 @@ def main() -> None:
     print(f"Diff size (bytes): {diff_size_bytes}")
     print(f"Review rules available: {bool(rules.strip())}")
     print("Gemini API key available: True")
+
+    check_gemini_connection(gemini_api_key)
 
 
 if __name__ == "__main__":
