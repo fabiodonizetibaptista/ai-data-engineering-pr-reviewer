@@ -19,6 +19,7 @@ REVIEW_OUTPUT_PATH = Path("/tmp/ai-review.md")
 
 # Modelo utilizado pelo reviewer.
 MODEL = "gemini-3.8-flash"
+REVIEW_MARKER = "<!-- ai-data-engineering-reviewer -->"
 
 # Evita enviar Pull Requests excessivamente grandes em uma única chamada.
 MAX_DIFF_BYTES = 100_000
@@ -184,6 +185,73 @@ def generate_review(
 
     return review
 
+def find_existing_review_comment(
+    github_token: str,
+    repository: str,
+    pull_request_number: int,
+) -> int | None:
+    """
+    Procura um comentário anterior criado pelo AI reviewer.
+
+    Retorna o ID do comentário caso encontre.
+    Caso contrário, retorna None.
+    """
+
+    page = 1
+
+    while True:
+        url = (
+            f"https://api.github.com/repos/{repository}"
+            f"/issues/{pull_request_number}/comments"
+            f"?per_page=100&page={page}"
+        )
+
+        request = urllib.request.Request(
+            url=url,
+            method="GET",
+            headers={
+                "Authorization": f"Bearer {github_token}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+        )
+
+        try:
+            with urllib.request.urlopen(
+                request,
+                timeout=30,
+            ) as response:
+                comments = json.loads(
+                    response.read().decode("utf-8")
+                )
+
+        except urllib.error.HTTPError as exc:
+            raise RuntimeError(
+                "Failed to list Pull Request comments "
+                f"(GitHub HTTP {exc.code})."
+            ) from None
+
+        except urllib.error.URLError:
+            raise RuntimeError(
+                "Failed to connect to GitHub while listing "
+                "Pull Request comments."
+            ) from None
+
+        if not comments:
+            return None
+
+        for comment in comments:
+            body = comment.get("body") or ""
+            author = comment.get("user") or {}
+
+            if (
+                REVIEW_MARKER in body
+                and author.get("login") == "github-actions[bot]"
+            ):
+                return comment["id"]
+
+        page += 1
+
 def publish_pull_request_review(
     github_token: str,
     review: str,
@@ -231,22 +299,41 @@ def publish_pull_request_review(
 
     pull_request_number = pull_request["number"]
 
-    url = (
-        f"https://api.github.com/repos/{repository}"
-        f"/pulls/{pull_request_number}/reviews"
+    comment_body = f"{REVIEW_MARKER}\n\n{review}"
+
+    existing_comment_id = find_existing_review_comment(
+        github_token=github_token,
+        repository=repository,
+        pull_request_number=pull_request_number,
     )
+
+    if existing_comment_id:
+        # Já existe um comentário do reviewer neste PR.
+        # Atualizamos o comentário existente para manter a publicação idempotente.
+        url = (
+            f"https://api.github.com/repos/{repository}"
+            f"/issues/comments/{existing_comment_id}"
+        )
+        method = "PATCH"
+    else:
+        # Primeira execução do reviewer neste PR.
+        # Criamos o comentário que será reutilizado nas próximas execuções.
+        url = (
+            f"https://api.github.com/repos/{repository}"
+            f"/issues/{pull_request_number}/comments"
+    )
+        method = "POST"
 
     payload = json.dumps(
         {
-            "body": review,
-            "event": "COMMENT",
+            "body": comment_body,
         }
     ).encode("utf-8")
 
     request = urllib.request.Request(
         url=url,
         data=payload,
-        method="POST",
+        method=method,
         headers={
             "Authorization": f"Bearer {github_token}",
             "Accept": "application/vnd.github+json",
