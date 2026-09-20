@@ -3,6 +3,8 @@ from pathlib import Path
 
 from google import genai
 
+from google.genai import types
+
 
 # Diff do Pull Request preparado pelo workflow.
 DIFF_PATH = Path("/tmp/pr.diff")
@@ -143,7 +145,25 @@ def generate_review(
     Envia as regras e o diff para a Gemini e retorna o review gerado.
     """
 
-    client = genai.Client(api_key=api_key)
+    client = genai.Client(
+    api_key=api_key,
+    http_options=types.HttpOptions(
+        retry_options=types.HttpRetryOptions(
+            attempts=4,
+            initial_delay=2.0,
+            max_delay=20.0,
+            exp_base=2.0,
+            http_status_codes=[
+                408,
+                429,
+                500,
+                502,
+                503,
+                504,
+            ],
+        )
+    ),
+)
 
     prompt = build_review_prompt(
         rules=rules,
