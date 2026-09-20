@@ -345,6 +345,11 @@ def main() -> None:
     print(f"Review available: {bool(review.strip())}")
     print(f"Review size (bytes): {REVIEW_OUTPUT_PATH.stat().st_size}")
 
+    publish_pull_request_review(
+        github_token=github_token,
+        review=review,
+    )
+
 
 if __name__ == "__main__":
     main()
