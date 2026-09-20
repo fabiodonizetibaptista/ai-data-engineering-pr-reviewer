@@ -2,7 +2,6 @@ import os
 from pathlib import Path
 
 from google import genai
-
 from google.genai import types
 
 
@@ -13,23 +12,18 @@ DIFF_PATH = Path("/tmp/pr.diff")
 RULES_PATH = Path(".ai-reviewer/rules/data-engineering.md")
 
 # Resultado gerado pela IA.
-# Neste momento ainda não será publicado no Pull Request.
 REVIEW_OUTPUT_PATH = Path("/tmp/ai-review.md")
 
 # Modelo utilizado pelo reviewer.
 MODEL = "gemini-3.8-flash"
 
 # Evita enviar Pull Requests excessivamente grandes em uma única chamada.
-# No futuro podemos evoluir isso para análise por arquivo ou por chunks.
 MAX_DIFF_BYTES = 100_000
 
 
 def load_file(path: Path, description: str) -> str:
     """
     Carrega um arquivo obrigatório utilizado pelo reviewer.
-
-    Falhamos explicitamente quando um insumo esperado não existe,
-    evitando que uma análise incompleta seja tratada como válida.
     """
 
     if not path.exists():
@@ -48,8 +42,6 @@ def build_review_prompt(rules: str, diff: str) -> str:
     Monta o prompt enviado à IA.
 
     O conteúdo do Pull Request deve ser tratado como entrada não confiável.
-    Isso reduz o risco de prompt injection através de comentários,
-    documentação ou código incluído no próprio diff.
     """
 
     return f"""
@@ -146,24 +138,24 @@ def generate_review(
     """
 
     client = genai.Client(
-    api_key=api_key,
-    http_options=types.HttpOptions(
-        retry_options=types.HttpRetryOptions(
-            attempts=4,
-            initial_delay=2.0,
-            max_delay=20.0,
-            exp_base=2.0,
-            http_status_codes=[
-                408,
-                429,
-                500,
-                502,
-                503,
-                504,
-            ],
-        )
-    ),
-)
+        api_key=api_key,
+        http_options=types.HttpOptions(
+            retry_options=types.HttpRetryOptions(
+                attempts=4,
+                initial_delay=2.0,
+                max_delay=20.0,
+                exp_base=2.0,
+                http_status_codes=[
+                    408,
+                    429,
+                    500,
+                    502,
+                    503,
+                    504,
+                ],
+            )
+        ),
+    )
 
     prompt = build_review_prompt(
         rules=rules,
@@ -176,9 +168,6 @@ def generate_review(
             input=prompt,
         )
     except Exception as exc:
-        # Evitamos registrar a mensagem completa da exceção,
-        # pois respostas de APIs podem eventualmente conter
-        # informações que não queremos expor nos logs.
         raise RuntimeError(
             f"Gemini review generation failed ({type(exc).__name__})."
         ) from None
@@ -195,16 +184,10 @@ def generate_review(
 
 def main() -> None:
     """
-    Executa a primeira revisão real do Pull Request.
+    Executa a revisão do Pull Request.
 
-    Fluxo:
-    1. carrega o diff;
-    2. carrega as regras;
-    3. valida o secret da Gemini;
-    4. envia o conteúdo para a IA;
-    5. salva o review em arquivo temporário.
-
-    O conteúdo do review ainda não é publicado no GitHub nesta etapa.
+    Nesta etapa ainda NÃO publicamos o review no GitHub.
+    Apenas validamos que todos os insumos necessários estão disponíveis.
     """
 
     diff = load_file(
@@ -218,10 +201,16 @@ def main() -> None:
     )
 
     gemini_api_key = os.getenv("GEMINI_API_KEY")
+    github_token = os.getenv("GITHUB_TOKEN")
 
     if not gemini_api_key:
         raise RuntimeError(
             "GEMINI_API_KEY environment variable is not available."
+        )
+
+    if not github_token:
+        raise RuntimeError(
+            "GITHUB_TOKEN environment variable is not available."
         )
 
     diff_size_bytes = DIFF_PATH.stat().st_size
@@ -239,6 +228,7 @@ def main() -> None:
     print(f"Diff size (bytes): {diff_size_bytes}")
     print(f"Review rules available: {bool(rules.strip())}")
     print("Gemini API key available: True")
+    print("GitHub token available: True")
 
     review = generate_review(
         api_key=gemini_api_key,
