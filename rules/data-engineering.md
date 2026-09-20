@@ -148,3 +148,55 @@ Preferred:
 NEEDS VERIFICATION — The Pull Request uses Docker image `example:3.2`. Its availability cannot be confirmed from the Pull Request alone. Verify the tag against the official registry or documentation before treating this as a defect.
 
 Never invent version history, release status, compatibility, or deprecation information.
+
+## Review Conclusion Rules
+
+The final conclusion must be based only on confirmed findings.
+
+Use these rules:
+
+### BLOCKER FOUND
+
+Use only when there is at least one confirmed HIGH severity finding that can reasonably block the Pull Request from being merged.
+
+Examples include:
+
+- data corruption;
+- data loss;
+- critical security vulnerability;
+- pipeline unable to execute;
+- clearly incorrect business logic;
+- serious reliability failure.
+
+A NEEDS VERIFICATION item must never cause BLOCKER FOUND by itself.
+
+### ATTENTION REQUIRED
+
+Use when there is at least one confirmed MEDIUM severity finding and no confirmed blocking HIGH severity finding.
+
+MEDIUM findings should represent meaningful engineering concerns that deserve attention before or shortly after merge.
+
+A NEEDS VERIFICATION item must never cause ATTENTION REQUIRED by itself.
+
+### NO BLOCKERS FOUND
+
+Use when:
+
+- there are no confirmed HIGH findings; and
+- there are no confirmed MEDIUM findings.
+
+This conclusion is valid even when the review contains:
+
+- LOW findings;
+- NEEDS VERIFICATION items;
+- questions for the author.
+
+LOW findings are improvements and must not block the Pull Request.
+
+NEEDS VERIFICATION means the reviewer does not have enough evidence to confirm a defect. It must not be treated as a confirmed problem.
+
+## Important
+
+The conclusion must reflect confirmed evidence, not uncertainty.
+
+Never upgrade severity merely because something could theoretically fail.
