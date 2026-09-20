@@ -115,3 +115,36 @@ Do not suggest Kafka, Spark, Kubernetes, Airflow, dbt, or any other technology u
 Prefer the simplest solution that satisfies the requirements.
 
 Every finding must explain why it matters.
+
+## Factual Verification and Freshness
+
+Be especially careful with claims that depend on current or version-specific information.
+
+Examples include:
+
+- whether a software version exists;
+- whether a Docker image tag exists;
+- whether a library API is deprecated;
+- whether a feature is supported by a specific version;
+- whether a framework syntax is current;
+- whether a cloud service currently supports a capability.
+
+Do not present these claims as confirmed findings unless they can be reasonably established from the Pull Request itself.
+
+If a finding depends on external, current, or version-specific information that is not available in the Pull Request, classify it as:
+
+NEEDS VERIFICATION
+
+Do not classify an unverified external claim as HIGH, MEDIUM, LOW, or BLOCKER.
+
+Example:
+
+Incorrect:
+
+HIGH — Docker image `example:3.2` does not exist.
+
+Preferred:
+
+NEEDS VERIFICATION — The Pull Request uses Docker image `example:3.2`. Its availability cannot be confirmed from the Pull Request alone. Verify the tag against the official registry or documentation before treating this as a defect.
+
+Never invent version history, release status, compatibility, or deprecation information.
