@@ -4,9 +4,10 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from google import genai
-from google.genai import types
-
+from providers.base import AIProviderUnavailableError
+from providers.fallback import FallbackProvider
+from providers.gemini import GeminiProvider
+from providers.groq import GroqProvider
 
 # Diff do Pull Request preparado pelo workflow.
 DIFF_PATH = Path("/tmp/pr.diff")
@@ -18,7 +19,9 @@ RULES_PATH = Path(".ai-reviewer/rules/data-engineering.md")
 REVIEW_OUTPUT_PATH = Path("/tmp/ai-review.md")
 
 # Modelo utilizado pelo reviewer.
-MODEL = "gemini-3.8-flash"
+GEMINI_MODEL = "gemini-3.8-flash"
+GROQ_MODEL = "openai/gpt-oss-120b"
+
 REVIEW_MARKER = "<!-- ai-data-engineering-reviewer -->"
 
 # Evita enviar Pull Requests excessivamente grandes em uma única chamada.
@@ -131,126 +134,56 @@ Briefly explain the reason.
 The final decision to merge belongs to the developer.
 """
 
-
 def generate_review(
-    api_key: str,
+    gemini_api_key: str | None,
+    groq_api_key: str | None,
     rules: str,
     diff: str,
 ) -> str:
     """
-    Envia as regras e o diff para a Gemini e retorna o review gerado.
-    """
+    Gera o review utilizando os providers de IA disponíveis.
 
-    client = genai.Client(
-        api_key=api_key,
-        http_options=types.HttpOptions(
-            retry_options=types.HttpRetryOptions(
-                attempts=4,
-                initial_delay=2.0,
-                max_delay=20.0,
-                exp_base=2.0,
-                http_status_codes=[
-                    408,
-                    429,
-                    500,
-                    502,
-                    503,
-                    504,
-                ],
-            )
-        ),
-    )
+    A ordem da lista define a prioridade:
+    1. Gemini
+    2. Groq
+
+    Se o provider principal estiver temporariamente indisponível,
+    o FallbackProvider tenta automaticamente o próximo.
+    """
 
     prompt = build_review_prompt(
         rules=rules,
         diff=diff,
     )
 
-    try:
-        interaction = client.interactions.create(
-            model=MODEL,
-            input=prompt,
+    providers = []
+
+    if gemini_api_key:
+        providers.append(
+            GeminiProvider(
+                api_key=gemini_api_key,
+                model=GEMINI_MODEL,
+            )
         )
-    except Exception as exc:
+
+    if groq_api_key:
+        providers.append(
+            GroqProvider(
+                api_key=groq_api_key,
+                model=GROQ_MODEL,
+            )
+        )
+
+    if not providers:
         raise RuntimeError(
-            f"Gemini review generation failed ({type(exc).__name__})."
-        ) from None
-
-    review = interaction.output_text
-
-    if not review or not review.strip():
-        raise RuntimeError(
-            "Gemini returned an empty Pull Request review."
+            "No AI provider API key is available."
         )
 
-    return review
+    provider = FallbackProvider(
+        providers=providers,
+    )
 
-def find_existing_review_comment(
-    github_token: str,
-    repository: str,
-    pull_request_number: int,
-) -> int | None:
-    """
-    Procura um comentário anterior criado pelo AI reviewer.
-
-    Retorna o ID do comentário caso encontre.
-    Caso contrário, retorna None.
-    """
-
-    page = 1
-
-    while True:
-        url = (
-            f"https://api.github.com/repos/{repository}"
-            f"/issues/{pull_request_number}/comments"
-            f"?per_page=100&page={page}"
-        )
-
-        request = urllib.request.Request(
-            url=url,
-            method="GET",
-            headers={
-                "Authorization": f"Bearer {github_token}",
-                "Accept": "application/vnd.github+json",
-                "X-GitHub-Api-Version": "2022-11-28",
-            },
-        )
-
-        try:
-            with urllib.request.urlopen(
-                request,
-                timeout=30,
-            ) as response:
-                comments = json.loads(
-                    response.read().decode("utf-8")
-                )
-
-        except urllib.error.HTTPError as exc:
-            raise RuntimeError(
-                "Failed to list Pull Request comments "
-                f"(GitHub HTTP {exc.code})."
-            ) from None
-
-        except urllib.error.URLError:
-            raise RuntimeError(
-                "Failed to connect to GitHub while listing "
-                "Pull Request comments."
-            ) from None
-
-        if not comments:
-            return None
-
-        for comment in comments:
-            body = comment.get("body") or ""
-            author = comment.get("user") or {}
-
-            if (
-                REVIEW_MARKER in body
-                and author.get("login") == "github-actions[bot]"
-            ):
-                return comment["id"]
-
-        page += 1
+    return provider.generate_review(prompt)
 
 def publish_pull_request_review(
     github_token: str,
@@ -388,11 +321,13 @@ def main() -> None:
     )
 
     gemini_api_key = os.getenv("GEMINI_API_KEY")
+    groq_api_key = os.getenv("GROQ_API_KEY")
     github_token = os.getenv("GITHUB_TOKEN")
 
-    if not gemini_api_key:
+    if not gemini_api_key and not groq_api_key:
         raise RuntimeError(
-            "GEMINI_API_KEY environment variable is not available."
+            "No AI provider API key is available. "
+            "Configure GEMINI_API_KEY or GROQ_API_KEY."
         )
 
     if not github_token:
@@ -414,14 +349,31 @@ def main() -> None:
     print(f"Diff lines: {diff_lines}")
     print(f"Diff size (bytes): {diff_size_bytes}")
     print(f"Review rules available: {bool(rules.strip())}")
-    print("Gemini API key available: True")
+    print(f"Gemini provider configured: {bool(gemini_api_key)}")
+    print(f"Groq provider configured: {bool(groq_api_key)}")
     print("GitHub token available: True")
 
-    review = generate_review(
-        api_key=gemini_api_key,
-        rules=rules,
-        diff=diff,
-    )
+    try:
+        review = generate_review(
+            gemini_api_key=gemini_api_key,
+            groq_api_key=groq_api_key,
+            rules=rules,
+            diff=diff,
+        )
+
+    except AIProviderUnavailableError as exc:
+        # A indisponibilidade dos provedores de IA não significa que
+        # o código do Pull Request esteja incorreto.
+        #
+        # Encerramos esta execução sem publicar um novo comentário,
+        # preservando o último review válido existente no PR.
+        print(
+            "WARNING: AI review skipped because all configured "
+            "providers are temporarily unavailable."
+        )
+        print(f"Provider status: {exc}")
+
+        return
 
     REVIEW_OUTPUT_PATH.write_text(
         review,

@@ -4,7 +4,10 @@ on:
   workflow_call:
     secrets:
       GEMINI_API_KEY:
-        required: true
+        required: false
+
+      GROQ_API_KEY:
+        required: false
 
 jobs:
   ai-review:
@@ -56,6 +59,7 @@ jobs:
       - name: Run AI reviewer
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           GITHUB_TOKEN: ${{ github.token }}
         run: python3 .ai-reviewer/src/reviewer.py
 
