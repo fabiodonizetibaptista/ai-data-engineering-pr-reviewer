@@ -1,9 +1,16 @@
 import json
 import os
 
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import (
+    BackgroundTasks,
+    FastAPI,
+    Header,
+    HTTPException,
+    Request,
+)
 
 from github_app.events import parse_pull_request_event
+from github_app.processor import process_pull_request_event
 from github_app.security import verify_webhook_signature
 
 
@@ -24,9 +31,6 @@ SUPPORTED_PULL_REQUEST_ACTIONS = {
 def health_check() -> dict[str, str]:
     """
     Endpoint simples de health check.
-
-    Serve para validar que o backend do GitHub App
-    está em execução e respondendo corretamente.
     """
 
     return {
@@ -37,6 +41,7 @@ def health_check() -> dict[str, str]:
 @app.post("/webhook")
 async def receive_webhook(
     request: Request,
+    background_tasks: BackgroundTasks,
     x_hub_signature_256: str | None = Header(
         default=None,
         alias="X-Hub-Signature-256",
@@ -49,14 +54,14 @@ async def receive_webhook(
     """
     Recebe eventos enviados pelo GitHub App.
 
-    O fluxo é:
-
-    1. Obtém o payload bruto.
-    2. Valida a assinatura HMAC enviada pelo GitHub.
+    Fluxo:
+    1. Lê o payload bruto.
+    2. Valida a assinatura HMAC.
     3. Ignora eventos que não sejam pull_request.
-    4. Ignora ações de pull_request que não exigem nova revisão.
-    5. Valida os metadados obrigatórios do pull request.
-    6. Aceita somente eventos que possam seguir para o reviewer.
+    4. Ignora ações que não exijam revisão.
+    5. Valida e extrai os metadados do PR.
+    6. Agenda o processamento em background.
+    7. Responde ao GitHub sem aguardar a análise por IA.
     """
 
     webhook_secret = os.getenv("GITHUB_WEBHOOK_SECRET")
@@ -85,7 +90,13 @@ async def receive_webhook(
             "status": "ignored",
         }
 
-    event_payload = json.loads(payload)
+    try:
+        event_payload = json.loads(payload)
+    except json.JSONDecodeError:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid JSON payload.",
+        )
 
     action = event_payload.get("action")
 
@@ -95,12 +106,19 @@ async def receive_webhook(
         }
 
     try:
-        parse_pull_request_event(event_payload)
+        event = parse_pull_request_event(
+            event_payload
+        )
     except (KeyError, TypeError):
         raise HTTPException(
             status_code=400,
             detail="Invalid pull request payload.",
         )
+
+    background_tasks.add_task(
+        process_pull_request_event,
+        event,
+    )
 
     return {
         "status": "accepted",

@@ -29,7 +29,8 @@ def build_signature(
 def test_accepts_webhook_with_valid_signature(monkeypatch):
     """
     Um webhook corretamente assinado, referente a um pull_request
-    e contendo os metadados obrigatórios deve ser aceito.
+    e contendo os metadados obrigatórios deve ser aceito e enviado
+    para processamento.
     """
 
     secret = "test-secret"
@@ -44,6 +45,17 @@ def test_accepts_webhook_with_valid_signature(monkeypatch):
     monkeypatch.setenv(
         "GITHUB_WEBHOOK_SECRET",
         secret,
+    )
+
+    captured = {}
+
+    def fake_process_pull_request_event(event):
+        captured["event"] = event
+        return True
+
+    monkeypatch.setattr(
+        "github_app.webhook.process_pull_request_event",
+        fake_process_pull_request_event,
     )
 
     response = client.post(
@@ -64,6 +76,15 @@ def test_accepts_webhook_with_valid_signature(monkeypatch):
     assert response.json() == {
         "status": "accepted",
     }
+
+    event = captured["event"]
+
+    assert event.action == "opened"
+    assert event.pull_request_number == 42
+    assert event.repository_full_name == (
+        "fabiodonizetibaptista/example-repository"
+    )
+    assert event.installation_id == 123456789
 
 
 def test_rejects_webhook_with_invalid_signature(monkeypatch):
@@ -192,4 +213,37 @@ def test_rejects_pull_request_with_missing_required_metadata(monkeypatch):
     assert response.status_code == 400
     assert response.json() == {
         "detail": "Invalid pull request payload.",
+    }
+
+def test_rejects_invalid_json_pull_request_payload(monkeypatch):
+    """
+    Um pull_request assinado corretamente, mas contendo JSON inválido,
+    deve ser rejeitado antes de chegar ao processor.
+    """
+
+    secret = "test-secret"
+    payload = b'{"action":"opened"'
+
+    monkeypatch.setenv(
+        "GITHUB_WEBHOOK_SECRET",
+        secret,
+    )
+
+    response = client.post(
+        "/webhook",
+        content=payload,
+        headers={
+            "Content-Type": "application/json",
+            "X-Hub-Signature-256": build_signature(
+                payload=payload,
+                secret=secret,
+            ),
+            "X-GitHub-Event": "pull_request",
+            "X-GitHub-Delivery": "test-delivery-id",
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "detail": "Invalid JSON payload.",
     }

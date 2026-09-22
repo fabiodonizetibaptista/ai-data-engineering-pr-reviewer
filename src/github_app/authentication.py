@@ -28,10 +28,6 @@ def load_github_app_credentials() -> GitHubAppCredentials:
     """
     Carrega o App ID e a chave privada do GitHub App
     a partir das configurações do ambiente.
-
-    Variáveis esperadas:
-    - GITHUB_APP_ID
-    - GITHUB_APP_PRIVATE_KEY_PATH
     """
 
     app_id = os.getenv("GITHUB_APP_ID")
@@ -62,11 +58,6 @@ def generate_app_jwt(
 ) -> str:
     """
     Gera o JWT usado para autenticar o GitHub App.
-
-    O token é assinado com RS256 e contém:
-    - iat: instante de emissão, com margem para clock skew.
-    - exp: expiração do token.
-    - iss: identificador do GitHub App.
     """
 
     payload = {
@@ -82,17 +73,50 @@ def generate_app_jwt(
     )
 
 
+def get_authenticated_app_slug(
+    app_jwt: str,
+) -> str:
+    """
+    Obtém o slug oficial do GitHub App autenticado.
+
+    O slug será usado para identificar com segurança
+    o comentário pertencente ao próprio bot.
+    """
+
+    request = Request(
+        url=f"{GITHUB_API_BASE_URL}/app",
+        method="GET",
+        headers={
+            "Authorization": f"Bearer {app_jwt}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": GITHUB_API_VERSION,
+        },
+    )
+
+    with urlopen(
+        request,
+        timeout=10,
+    ) as response:
+        response_body = json.loads(
+            response.read().decode("utf-8")
+        )
+
+    slug = response_body.get("slug")
+
+    if not slug:
+        raise RuntimeError(
+            "GitHub did not return the authenticated app slug."
+        )
+
+    return slug
+
+
 def create_installation_access_token(
     app_jwt: str,
     installation_id: int,
 ) -> str:
     """
     Troca o JWT do GitHub App por um Installation Access Token.
-
-    Esse token será usado nas chamadas feitas em nome da instalação,
-    como consultar o pull request e publicar o review.
-
-    O token nunca deve ser escrito em logs.
     """
 
     url = (
