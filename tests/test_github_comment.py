@@ -180,7 +180,7 @@ def test_creates_comment_when_no_existing_review_comment(
         fake_urlopen,
     )
 
-    reviewer.publish_pull_request_review(
+    reviewer.publish_or_update_pr_comment(
         github_token="fake-token",
         review="# AI Data Engineering Review",
     )
@@ -260,7 +260,7 @@ def test_updates_existing_review_comment(
         fake_urlopen,
     )
 
-    reviewer.publish_pull_request_review(
+    reviewer.publish_or_update_pr_comment(
         github_token="fake-token",
         review="# Updated AI Data Engineering Review",
     )

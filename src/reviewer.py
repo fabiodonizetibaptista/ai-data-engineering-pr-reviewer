@@ -98,7 +98,7 @@ Provide a concise technical summary of the change.
 
 For every relevant finding, provide:
 
-- Severity: HIGH, MEDIUM or LOW
+- Classification: HIGH, MEDIUM, LOW or NEEDS VERIFICATION
 - File or affected area
 - Problem
 - Why it matters
@@ -252,15 +252,18 @@ def find_existing_review_comment(
 
         page += 1
 
-def publish_pull_request_review(
+def publish_or_update_pr_comment(
     github_token: str,
     review: str,
 ) -> None:
     """
-    Publica o resultado da análise como um review do tipo COMMENT
+    Publica ou atualiza o comentário do AI reviewer
     no Pull Request atual.
 
-    A IA não aprova nem bloqueia o PR automaticamente.
+    Se já existir um comentário identificado pelo REVIEW_MARKER,
+    ele é atualizado para manter a publicação idempotente.
+
+    A IA não aprova nem bloqueia o Pull Request automaticamente.
     A decisão final continua pertencendo ao desenvolvedor.
     """
 
@@ -357,7 +360,7 @@ def publish_pull_request_review(
         # Não exibimos body nem headers da resposta para evitar
         # vazamento acidental de informações nos logs.
         raise RuntimeError(
-            "Failed to publish Pull Request review "
+            "Failed to publish or update Pull Request comment "
             f"(GitHub HTTP {exc.code})."
         ) from None
 
@@ -366,15 +369,17 @@ def publish_pull_request_review(
             "Failed to connect to GitHub while publishing the review."
         ) from None
 
-    print("Pull Request review published successfully.")
+    print("Pull Request comment published or updated successfully.")
 
 
 def main() -> None:
     """
-    Executa a revisão do Pull Request.
+    Executa o fluxo completo de revisão do Pull Request.
 
-    Nesta etapa ainda NÃO publicamos o review no GitHub.
-    Apenas validamos que todos os insumos necessários estão disponíveis.
+    O processo carrega o diff e as regras de engenharia,
+    gera o review utilizando os providers de IA disponíveis,
+    salva o resultado para auditoria e publica ou atualiza
+    o comentário correspondente no Pull Request.
     """
 
     diff = load_file(
@@ -451,7 +456,7 @@ def main() -> None:
     print(f"Review available: {bool(review.strip())}")
     print(f"Review size (bytes): {REVIEW_OUTPUT_PATH.stat().st_size}")
 
-    publish_pull_request_review(
+    publish_or_update_pr_comment(
         github_token=github_token,
         review=review,
     )
