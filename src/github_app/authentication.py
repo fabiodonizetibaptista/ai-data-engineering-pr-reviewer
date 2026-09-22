@@ -1,8 +1,14 @@
+import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.request import Request, urlopen
 
 import jwt
+
+
+GITHUB_API_BASE_URL = "https://api.github.com"
+GITHUB_API_VERSION = "2026-03-10"
 
 
 @dataclass(frozen=True)
@@ -58,7 +64,7 @@ def generate_app_jwt(
     Gera o JWT usado para autenticar o GitHub App.
 
     O token é assinado com RS256 e contém:
-    - iat: instante de emissão, com pequena margem para clock skew.
+    - iat: instante de emissão, com margem para clock skew.
     - exp: expiração do token.
     - iss: identificador do GitHub App.
     """
@@ -74,3 +80,50 @@ def generate_app_jwt(
         key=private_key,
         algorithm="RS256",
     )
+
+
+def create_installation_access_token(
+    app_jwt: str,
+    installation_id: int,
+) -> str:
+    """
+    Troca o JWT do GitHub App por um Installation Access Token.
+
+    Esse token será usado nas chamadas feitas em nome da instalação,
+    como consultar o pull request e publicar o review.
+
+    O token nunca deve ser escrito em logs.
+    """
+
+    url = (
+        f"{GITHUB_API_BASE_URL}/app/installations/"
+        f"{installation_id}/access_tokens"
+    )
+
+    request = Request(
+        url=url,
+        data=b"",
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {app_jwt}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": GITHUB_API_VERSION,
+        },
+    )
+
+    with urlopen(
+        request,
+        timeout=10,
+    ) as response:
+        response_body = json.loads(
+            response.read().decode("utf-8")
+        )
+
+    token = response_body.get("token")
+
+    if not token:
+        raise RuntimeError(
+            "GitHub did not return an installation access token."
+        )
+
+    return token
