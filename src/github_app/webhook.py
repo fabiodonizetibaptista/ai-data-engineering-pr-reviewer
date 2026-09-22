@@ -3,6 +3,7 @@ import os
 
 from fastapi import FastAPI, Header, HTTPException, Request
 
+from github_app.events import parse_pull_request_event
 from github_app.security import verify_webhook_signature
 
 
@@ -54,7 +55,8 @@ async def receive_webhook(
     2. Valida a assinatura HMAC enviada pelo GitHub.
     3. Ignora eventos que não sejam pull_request.
     4. Ignora ações de pull_request que não exigem nova revisão.
-    5. Aceita somente ações suportadas pelo reviewer.
+    5. Valida os metadados obrigatórios do pull request.
+    6. Aceita somente eventos que possam seguir para o reviewer.
     """
 
     webhook_secret = os.getenv("GITHUB_WEBHOOK_SECRET")
@@ -91,6 +93,14 @@ async def receive_webhook(
         return {
             "status": "ignored",
         }
+
+    try:
+        parse_pull_request_event(event_payload)
+    except (KeyError, TypeError):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid pull request payload.",
+        )
 
     return {
         "status": "accepted",
