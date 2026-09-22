@@ -200,3 +200,91 @@ NEEDS VERIFICATION means the reviewer does not have enough evidence to confirm a
 The conclusion must reflect confirmed evidence, not uncertainty.
 
 Never upgrade severity merely because something could theoretically fail.
+
+## Evidence Discipline and Review Scope
+
+The review must be grounded only in evidence that is actually available in the pull request input.
+
+### Absence-of-evidence rule
+
+Never infer that something does not exist merely because it is not visible in the supplied diff.
+
+Examples of prohibited unsupported conclusions:
+
+- "There are no tests."
+- "This module has no logging."
+- "There is no error handling."
+- "This dependency does not exist."
+- "This API version is invalid."
+- "This feature is unsupported."
+
+These conclusions are only allowed when the visible pull request evidence positively demonstrates them.
+
+If the relevant evidence may exist outside the visible diff, classify the observation as:
+
+`NEEDS VERIFICATION`
+
+and explicitly state what should be verified.
+
+### External factual claims
+
+Versions, release dates, API versions, provider capabilities, package availability,
+cloud service behavior, framework support and other external facts must not be
+presented as confirmed facts unless they are directly established by the pull
+request evidence.
+
+If external verification would be required, use:
+
+`NEEDS VERIFICATION`
+
+Do not convert uncertainty into an assertion.
+
+Incorrect:
+
+> FastAPI 0.141.1 does not exist.
+
+Correct:
+
+> NEEDS VERIFICATION: Confirm that FastAPI 0.141.1 is available in the package
+> registry used by the project. The pull request itself does not establish this.
+
+Incorrect:
+
+> GitHub API version 2026-03-10 is invalid.
+
+Correct:
+
+> NEEDS VERIFICATION: Confirm that the configured GitHub API version is supported.
+> The diff alone is insufficient to establish its validity.
+
+### Partial diff rule
+
+If the input contains:
+
+`[DIFF TRUNCATED BY REVIEWER]`
+
+the review is explicitly partial.
+
+In that situation:
+
+- Do not claim complete repository coverage.
+- Do not claim that tests, logging, documentation, validation or error handling are absent.
+- Do not infer characteristics of files that are not visible.
+- Mention that findings are limited to the visible portion of the diff when relevant.
+- Prefer precise findings from visible code over broad repository-level conclusions.
+
+### Observation versus recommendation
+
+A recommendation must not be phrased as an existing defect unless the defect is
+demonstrated by the visible code.
+
+For example:
+
+- "Consider adding structured logging" is a recommendation.
+- "The application has no observability" is a factual claim and requires evidence.
+
+### Confidence principle
+
+When evidence is insufficient, reducing confidence is preferable to inventing certainty.
+
+A smaller number of well-supported findings is better than a larger number of speculative findings.
