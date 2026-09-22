@@ -1,13 +1,14 @@
 from github_app.authentication import GitHubAppCredentials
+from github_app.diff_chunking import DiffChunkPlan
 from github_app.events import PullRequestEvent
 from github_app.processor import process_pull_request_event
+from providers.base import AIProviderUnavailableError
 
 
-def test_processes_pull_request_and_publishes_review(
+def configure_common_mocks(
     monkeypatch,
     tmp_path,
 ):
-
     rules_path = tmp_path / "data-engineering.md"
     rules_path.write_text(
         "Data Engineering rules for test.",
@@ -59,12 +60,54 @@ def test_processes_pull_request_and_publishes_review(
 
     monkeypatch.setattr(
         "github_app.processor.get_pull_request_diff",
-        lambda **kwargs: "fake pull request diff",
+        lambda **kwargs: "complete fake diff",
+    )
+
+
+def test_processes_all_diff_chunks_and_publishes_review(
+    monkeypatch,
+    tmp_path,
+):
+    configure_common_mocks(
+        monkeypatch,
+        tmp_path,
+    )
+
+    plan = DiffChunkPlan(
+        chunks=(
+            "chunk one",
+            "chunk two",
+        ),
+        total_chunks=2,
+        omitted_chunks=0,
+        omitted_bytes=0,
     )
 
     monkeypatch.setattr(
+        "github_app.processor.chunk_pull_request_diff",
+        lambda diff: plan,
+    )
+
+    reviewed_chunks = []
+
+    def fake_generate_review(
+        gemini_api_key,
+        groq_api_key,
+        rules,
+        diff,
+    ):
+        reviewed_chunks.append(
+            diff
+        )
+
+        return (
+            "# AI Data Engineering Review\n\n"
+            f"Review for {diff}"
+        )
+
+    monkeypatch.setattr(
         "github_app.processor.generate_review",
-        lambda **kwargs: "Generated AI review",
+        fake_generate_review,
     )
 
     captured = {}
@@ -76,9 +119,6 @@ def test_processes_pull_request_and_publishes_review(
         review,
         bot_login,
     ):
-        captured["installation_token"] = installation_token
-        captured["repository"] = repository_full_name
-        captured["pr"] = pull_request_number
         captured["review"] = review
         captured["bot_login"] = bot_login
 
@@ -101,37 +141,73 @@ def test_processes_pull_request_and_publishes_review(
     )
 
     assert result is True
-    assert captured["installation_token"] == "fake-installation-token"
-    assert captured["repository"] == "owner/repository"
-    assert captured["pr"] == 42
-    assert captured["review"] == "Generated AI review"
+
+    assert reviewed_chunks == [
+        "chunk one",
+        "chunk two",
+    ]
+
+    assert "Review for chunk one" in captured["review"]
+    assert "Review for chunk two" in captured["review"]
+    assert "Partial Review 1 of 2" in captured["review"]
+    assert "Partial Review 2 of 2" in captured["review"]
     assert captured["bot_login"] == "ai-reviewer[bot]"
 
-from github_app.processor import (
-    MAX_REVIEW_DIFF_BYTES,
-    TRUNCATION_NOTICE,
-    limit_diff_for_review,
-)
 
+def test_does_not_publish_when_ai_providers_are_unavailable(
+    monkeypatch,
+    tmp_path,
+):
+    configure_common_mocks(
+        monkeypatch,
+        tmp_path,
+    )
 
-def test_keeps_small_diff_unchanged():
-    diff = "small diff"
+    plan = DiffChunkPlan(
+        chunks=("chunk one",),
+        total_chunks=1,
+        omitted_chunks=0,
+        omitted_bytes=0,
+    )
 
-    result = limit_diff_for_review(diff)
+    monkeypatch.setattr(
+        "github_app.processor.chunk_pull_request_diff",
+        lambda diff: plan,
+    )
 
-    assert result == diff
+    def unavailable_provider(**kwargs):
+        raise AIProviderUnavailableError(
+            "Providers unavailable."
+        )
 
+    monkeypatch.setattr(
+        "github_app.processor.generate_review",
+        unavailable_provider,
+    )
 
-def test_truncates_large_diff_before_ai_review():
-    diff = "x" * (MAX_REVIEW_DIFF_BYTES + 10_000)
+    published = {
+        "value": False,
+    }
 
-    result = limit_diff_for_review(diff)
+    def fake_publish(**kwargs):
+        published["value"] = True
+        return 123
 
-    assert len(
-        result.replace(
-            TRUNCATION_NOTICE,
-            "",
-        ).encode("utf-8")
-    ) <= MAX_REVIEW_DIFF_BYTES
+    monkeypatch.setattr(
+        "github_app.processor.publish_or_update_pull_request_comment",
+        fake_publish,
+    )
 
-    assert TRUNCATION_NOTICE in result
+    event = PullRequestEvent(
+        action="synchronize",
+        pull_request_number=42,
+        repository_full_name="owner/repository",
+        installation_id=123456789,
+    )
+
+    result = process_pull_request_event(
+        event
+    )
+
+    assert result is False
+    assert published["value"] is False

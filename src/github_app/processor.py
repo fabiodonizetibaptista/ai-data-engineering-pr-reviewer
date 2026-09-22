@@ -8,6 +8,10 @@ from github_app.authentication import (
     get_authenticated_app_slug,
     load_github_app_credentials,
 )
+from github_app.diff_chunking import (
+    DiffChunkPlan,
+    chunk_pull_request_diff,
+)
 from github_app.events import PullRequestEvent
 from github_app.github_client import (
     get_pull_request_diff,
@@ -23,45 +27,131 @@ RULES_PATH = (
     / "data-engineering.md"
 )
 
-MAX_REVIEW_DIFF_BYTES = 20_000
 
-TRUNCATION_NOTICE = (
-    "\n\n"
-    "[DIFF TRUNCATED BY REVIEWER]\n"
-    "The pull request diff exceeded the current review input budget. "
-    "Review only the visible portion and do not make claims about omitted code."
-)
-
-
-def limit_diff_for_review(diff: str) -> str:
+def _build_chunk_rules(
+    rules: str,
+    chunk_number: int,
+    review_chunk_count: int,
+    plan: DiffChunkPlan,
+) -> str:
     """
-    Limita o diff enviado ao provider para evitar requests excessivamente
-    grandes durante a análise.
-
-    A truncagem ocorre por bytes UTF-8, preservando texto válido.
-    O aviso explícito impede que o modelo trate a amostra como o PR completo.
+    Acrescenta contexto de cobertura às regras sem alterar
+    permanentemente o documento normativo do reviewer.
     """
 
-    encoded_diff = diff.encode("utf-8")
-
-    if len(encoded_diff) <= MAX_REVIEW_DIFF_BYTES:
-        return diff
-
-    truncated_diff = encoded_diff[
-        :MAX_REVIEW_DIFF_BYTES
-    ].decode(
-        "utf-8",
-        errors="ignore",
+    coverage = (
+        "\n\n"
+        "## Runtime Review Context\n\n"
+        f"You are reviewing chunk {chunk_number} "
+        f"of {review_chunk_count} supplied to the AI reviewer.\n\n"
+        "This chunk is not necessarily representative of the entire pull request.\n"
+        "Do not infer the absence of tests, logging, validation, documentation, "
+        "error handling or other functionality from this chunk alone.\n"
+        "Limit this chunk review to the strongest findings supported by visible code.\n"
+        "Prefer at most 5 findings for this chunk.\n"
     )
 
-    return truncated_diff + TRUNCATION_NOTICE
+    if plan.is_partial:
+        coverage += (
+            "\nThe reviewer could not process the entire pull request within "
+            "the configured execution budget. "
+            f"{plan.omitted_chunks} chunk(s) were omitted. "
+            "Do not claim complete pull request coverage.\n"
+        )
+
+    return rules + coverage
+
+
+def _strip_review_title(
+    review: str,
+) -> str:
+    """
+    Remove apenas o título repetitivo do review parcial,
+    preservando todo o restante da resposta do provider.
+    """
+
+    lines = review.strip().splitlines()
+
+    if not lines:
+        return ""
+
+    first_line = (
+        lines[0]
+        .replace("#", "")
+        .strip()
+        .lower()
+    )
+
+    if first_line == "ai data engineering review":
+        lines = lines[1:]
+
+    return "\n".join(lines).strip()
+
+
+def combine_chunk_reviews(
+    reviews: list[str],
+    plan: DiffChunkPlan,
+) -> str:
+    """
+    Consolidação determinística inicial dos reviews parciais.
+
+    Nesta etapa evitamos uma chamada extra ao LLM.
+    A futura saída estruturada permitirá deduplicação
+    semântica mais sofisticada.
+    """
+
+    if not reviews:
+        raise ValueError(
+            "At least one chunk review is required."
+        )
+
+    if len(reviews) == 1 and not plan.is_partial:
+        return reviews[0]
+
+    reviewed_count = len(reviews)
+
+    if plan.is_partial:
+        coverage_message = (
+            f"> Review coverage: {reviewed_count} of "
+            f"{plan.total_chunks} generated chunks were analyzed. "
+            f"{plan.omitted_chunks} chunk(s) were omitted due to "
+            "the configured execution budget."
+        )
+    else:
+        coverage_message = (
+            f"> Review coverage: the pull request was analyzed "
+            f"in {reviewed_count} chunks."
+        )
+
+    sections = [
+        "# AI Data Engineering Review",
+        "",
+        coverage_message,
+    ]
+
+    for index, review in enumerate(
+        reviews,
+        start=1,
+    ):
+        sections.extend(
+            [
+                "",
+                "---",
+                "",
+                f"## Partial Review {index} of {reviewed_count}",
+                "",
+                _strip_review_title(review),
+            ]
+        )
+
+    return "\n".join(sections).strip()
 
 
 def process_pull_request_event(
     event: PullRequestEvent,
 ) -> bool:
     """
-    Executa o pipeline completo de análise de um pull request.
+    Executa o pipeline completo de análise do pull request.
     """
 
     credentials = load_github_app_credentials()
@@ -89,30 +179,60 @@ def process_pull_request_event(
         pull_request_number=event.pull_request_number,
     )
 
-    diff = limit_diff_for_review(diff)
+    plan = chunk_pull_request_diff(
+        diff
+    )
 
     rules = RULES_PATH.read_text(
         encoding="utf-8",
     )
 
-    gemini_api_key = os.getenv("GEMINI_API_KEY")
-    groq_api_key = os.getenv("GROQ_API_KEY")
+    gemini_api_key = os.getenv(
+        "GEMINI_API_KEY"
+    )
+
+    groq_api_key = os.getenv(
+        "GROQ_API_KEY"
+    )
+
+    chunk_reviews: list[str] = []
 
     try:
-        review = generate_review(
-            gemini_api_key=gemini_api_key,
-            groq_api_key=groq_api_key,
-            rules=rules,
-            diff=diff,
-        )
+        for index, chunk in enumerate(
+            plan.chunks,
+            start=1,
+        ):
+            chunk_rules = _build_chunk_rules(
+                rules=rules,
+                chunk_number=index,
+                review_chunk_count=len(plan.chunks),
+                plan=plan,
+            )
+
+            review = generate_review(
+                gemini_api_key=gemini_api_key,
+                groq_api_key=groq_api_key,
+                rules=chunk_rules,
+                diff=chunk,
+            )
+
+            chunk_reviews.append(
+                review
+            )
+
     except AIProviderUnavailableError:
         return False
+
+    final_review = combine_chunk_reviews(
+        reviews=chunk_reviews,
+        plan=plan,
+    )
 
     publish_or_update_pull_request_comment(
         installation_token=installation_token,
         repository_full_name=event.repository_full_name,
         pull_request_number=event.pull_request_number,
-        review=review,
+        review=final_review,
         bot_login=bot_login,
     )
 
