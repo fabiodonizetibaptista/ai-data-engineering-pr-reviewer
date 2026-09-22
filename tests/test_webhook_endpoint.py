@@ -54,7 +54,7 @@ def test_accepts_webhook_with_valid_signature(monkeypatch):
         return True
 
     monkeypatch.setattr(
-        "github_app.webhook.process_pull_request_event",
+        "github_app.webhook.run_pull_request_review_safely",
         fake_process_pull_request_event,
     )
 

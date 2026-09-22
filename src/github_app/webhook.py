@@ -10,7 +10,7 @@ from fastapi import (
 )
 
 from github_app.events import parse_pull_request_event
-from github_app.processor import process_pull_request_event
+from github_app.background import run_pull_request_review_safely
 from github_app.security import verify_webhook_signature
 
 
@@ -116,7 +116,7 @@ async def receive_webhook(
         )
 
     background_tasks.add_task(
-        process_pull_request_event,
+        run_pull_request_review_safely,
         event,
     )
 
