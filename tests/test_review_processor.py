@@ -106,3 +106,32 @@ def test_processes_pull_request_and_publishes_review(
     assert captured["pr"] == 42
     assert captured["review"] == "Generated AI review"
     assert captured["bot_login"] == "ai-reviewer[bot]"
+
+from github_app.processor import (
+    MAX_REVIEW_DIFF_BYTES,
+    TRUNCATION_NOTICE,
+    limit_diff_for_review,
+)
+
+
+def test_keeps_small_diff_unchanged():
+    diff = "small diff"
+
+    result = limit_diff_for_review(diff)
+
+    assert result == diff
+
+
+def test_truncates_large_diff_before_ai_review():
+    diff = "x" * (MAX_REVIEW_DIFF_BYTES + 10_000)
+
+    result = limit_diff_for_review(diff)
+
+    assert len(
+        result.replace(
+            TRUNCATION_NOTICE,
+            "",
+        ).encode("utf-8")
+    ) <= MAX_REVIEW_DIFF_BYTES
+
+    assert TRUNCATION_NOTICE in result

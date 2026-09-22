@@ -23,6 +23,39 @@ RULES_PATH = (
     / "data-engineering.md"
 )
 
+MAX_REVIEW_DIFF_BYTES = 20_000
+
+TRUNCATION_NOTICE = (
+    "\n\n"
+    "[DIFF TRUNCATED BY REVIEWER]\n"
+    "The pull request diff exceeded the current review input budget. "
+    "Review only the visible portion and do not make claims about omitted code."
+)
+
+
+def limit_diff_for_review(diff: str) -> str:
+    """
+    Limita o diff enviado ao provider para evitar requests excessivamente
+    grandes durante a análise.
+
+    A truncagem ocorre por bytes UTF-8, preservando texto válido.
+    O aviso explícito impede que o modelo trate a amostra como o PR completo.
+    """
+
+    encoded_diff = diff.encode("utf-8")
+
+    if len(encoded_diff) <= MAX_REVIEW_DIFF_BYTES:
+        return diff
+
+    truncated_diff = encoded_diff[
+        :MAX_REVIEW_DIFF_BYTES
+    ].decode(
+        "utf-8",
+        errors="ignore",
+    )
+
+    return truncated_diff + TRUNCATION_NOTICE
+
 
 def process_pull_request_event(
     event: PullRequestEvent,
@@ -55,6 +88,8 @@ def process_pull_request_event(
         repository_full_name=event.repository_full_name,
         pull_request_number=event.pull_request_number,
     )
+
+    diff = limit_diff_for_review(diff)
 
     rules = RULES_PATH.read_text(
         encoding="utf-8",
