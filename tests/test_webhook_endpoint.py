@@ -28,7 +28,8 @@ def build_signature(
 
 def test_accepts_webhook_with_valid_signature(monkeypatch):
     """
-    Um webhook corretamente assinado deve ser aceito.
+    Um webhook corretamente assinado e referente a um pull_request
+    deve ser aceito.
     """
 
     secret = "test-secret"
@@ -48,6 +49,8 @@ def test_accepts_webhook_with_valid_signature(monkeypatch):
                 payload=payload,
                 secret=secret,
             ),
+            "X-GitHub-Event": "pull_request",
+            "X-GitHub-Delivery": "test-delivery-id",
         },
     )
 
@@ -73,10 +76,79 @@ def test_rejects_webhook_with_invalid_signature(monkeypatch):
         headers={
             "Content-Type": "application/json",
             "X-Hub-Signature-256": "sha256=invalid",
+            "X-GitHub-Event": "pull_request",
+            "X-GitHub-Delivery": "test-delivery-id",
         },
     )
 
     assert response.status_code == 401
     assert response.json() == {
         "detail": "Invalid webhook signature.",
+    }
+
+
+def test_ignores_non_pull_request_event(monkeypatch):
+    """
+    Eventos que não sejam pull_request devem ser aceitos pelo endpoint,
+    mas ignorados pelo reviewer.
+    """
+
+    secret = "test-secret"
+    payload = b'{"action":"created"}'
+
+    monkeypatch.setenv(
+        "GITHUB_WEBHOOK_SECRET",
+        secret,
+    )
+
+    response = client.post(
+        "/webhook",
+        content=payload,
+        headers={
+            "Content-Type": "application/json",
+            "X-Hub-Signature-256": build_signature(
+                payload=payload,
+                secret=secret,
+            ),
+            "X-GitHub-Event": "installation",
+            "X-GitHub-Delivery": "test-delivery-id",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "ignored",
+    }
+
+def test_ignores_unsupported_pull_request_action(monkeypatch):
+    """
+    Eventos pull_request com ações que não exigem nova análise
+    devem ser aceitos, mas ignorados pelo reviewer.
+    """
+
+    secret = "test-secret"
+    payload = b'{"action":"closed"}'
+
+    monkeypatch.setenv(
+        "GITHUB_WEBHOOK_SECRET",
+        secret,
+    )
+
+    response = client.post(
+        "/webhook",
+        content=payload,
+        headers={
+            "Content-Type": "application/json",
+            "X-Hub-Signature-256": build_signature(
+                payload=payload,
+                secret=secret,
+            ),
+            "X-GitHub-Event": "pull_request",
+            "X-GitHub-Delivery": "test-delivery-id",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "ignored",
     }

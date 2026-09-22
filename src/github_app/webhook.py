@@ -1,3 +1,4 @@
+import json
 import os
 
 from fastapi import FastAPI, Header, HTTPException, Request
@@ -9,6 +10,13 @@ app = FastAPI(
     title="AI Data Engineering PR Reviewer",
     version="0.1.0",
 )
+
+
+SUPPORTED_PULL_REQUEST_ACTIONS = {
+    "opened",
+    "synchronize",
+    "reopened",
+}
 
 
 @app.get("/health")
@@ -32,12 +40,21 @@ async def receive_webhook(
         default=None,
         alias="X-Hub-Signature-256",
     ),
+    x_github_event: str | None = Header(
+        default=None,
+        alias="X-GitHub-Event",
+    ),
 ) -> dict[str, str]:
     """
     Recebe eventos enviados pelo GitHub App.
 
-    Antes de processar qualquer conteúdo, valida a assinatura
-    criptográfica enviada pelo GitHub.
+    O fluxo é:
+
+    1. Obtém o payload bruto.
+    2. Valida a assinatura HMAC enviada pelo GitHub.
+    3. Ignora eventos que não sejam pull_request.
+    4. Ignora ações de pull_request que não exigem nova revisão.
+    5. Aceita somente ações suportadas pelo reviewer.
     """
 
     webhook_secret = os.getenv("GITHUB_WEBHOOK_SECRET")
@@ -60,6 +77,20 @@ async def receive_webhook(
             status_code=401,
             detail="Invalid webhook signature.",
         )
+
+    if x_github_event != "pull_request":
+        return {
+            "status": "ignored",
+        }
+
+    event_payload = json.loads(payload)
+
+    action = event_payload.get("action")
+
+    if action not in SUPPORTED_PULL_REQUEST_ACTIONS:
+        return {
+            "status": "ignored",
+        }
 
     return {
         "status": "accepted",
