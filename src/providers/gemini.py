@@ -1,93 +1,96 @@
 from google import genai
 from google.genai import types
 
-from providers.base import AIProvider, AIProviderUnavailableError
+from providers.base import (
+    AIProvider,
+    AIProviderUnavailableError,
+)
+
+
+GEMINI_TIMEOUT_MS = 90_000
+
+TRANSIENT_HTTP_STATUS_CODES = {
+    408,
+    429,
+    500,
+    502,
+    503,
+    504,
+}
+
+TRANSIENT_EXCEPTION_NAMES = {
+    "APIConnectionError",
+    "APITimeoutError",
+    "ConnectError",
+    "ConnectTimeout",
+    "ReadError",
+    "ReadTimeout",
+    "TimeoutError",
+}
 
 
 class GeminiProvider(AIProvider):
     """
-    Implementação do AIProvider utilizando a API da Gemini.
+    Provider responsável por gerar reviews utilizando Gemini.
+
+    Falhas transitórias são convertidas para
+    AIProviderUnavailableError para permitir fallback.
     """
 
     def __init__(
         self,
         api_key: str,
         model: str,
-    ) -> None:
-        self._api_key = api_key
+    ):
         self._model = model
+
+        self._client = genai.Client(
+            api_key=api_key,
+            http_options=types.HttpOptions(
+                timeout=GEMINI_TIMEOUT_MS,
+            ),
+        )
 
     @property
     def name(self) -> str:
         return "gemini"
 
-    def generate_review(self, prompt: str) -> str:
-        """
-        Envia o prompt para a Gemini e retorna o conteúdo gerado.
-        """
-
-        client = genai.Client(
-            api_key=self._api_key,
-            http_options=types.HttpOptions(
-                retry_options=types.HttpRetryOptions(
-                    attempts=4,
-                    initial_delay=2.0,
-                    max_delay=20.0,
-                    exp_base=2.0,
-                    http_status_codes=[
-                        408,
-                        429,
-                        500,
-                        502,
-                        503,
-                        504,
-                    ],
-                )
-            ),
-        )
-
+    def generate_review(
+        self,
+        prompt: str,
+    ) -> str:
         try:
-            interaction = client.interactions.create(
+            interaction = self._client.interactions.create(
                 model=self._model,
                 input=prompt,
             )
 
         except Exception as exc:
-            status_code = getattr(exc, "code", None)
+            status_code = (
+                getattr(exc, "status_code", None)
+                or getattr(exc, "code", None)
+            )
 
-            # Esses códigos representam falhas que podem ser temporárias.
-            # Depois que os retries do SDK se esgotarem, permitimos que
-            # outro provider seja utilizado como fallback.
-            if status_code in {
-                408,
-                429,
-                500,
-                502,
-                503,
-                504,
-            }:
-                raise AIProviderUnavailableError(
-                    f"Gemini temporarily unavailable "
-                    f"(HTTP {status_code})."
-                ) from None
+            exception_name = type(exc).__name__
 
-            # Salvaguarda para o RateLimitError observado na execução
-            # real do GitHub Actions.
-            if type(exc).__name__ == "RateLimitError":
+            if (
+                status_code in TRANSIENT_HTTP_STATUS_CODES
+                or exception_name in TRANSIENT_EXCEPTION_NAMES
+            ):
                 raise AIProviderUnavailableError(
-                    "Gemini rate limit remained unavailable after retries."
+                    "Gemini is temporarily unavailable."
                 ) from None
 
             raise RuntimeError(
-                f"Gemini review generation failed "
-                f"({type(exc).__name__})."
+                "Gemini review generation failed "
+                f"({exception_name})."
             ) from None
 
         review = interaction.output_text
 
-        if not review or not review.strip():
+        if not review:
             raise RuntimeError(
-                "Gemini returned an empty Pull Request review."
+                "Gemini returned an empty review."
             )
 
-        return review
+        return review.strip()
