@@ -1,3 +1,4 @@
+import base64
 import json
 import os
 from dataclasses import dataclass
@@ -16,38 +17,76 @@ class GitHubAppCredentials:
     """
     Credenciais necessárias para autenticar o GitHub App.
 
-    A chave privada é mantida apenas em memória
-    e nunca deve ser registrada em logs.
+    A chave privada é mantida apenas em memória e nunca
+    deve ser registrada em logs.
     """
 
     app_id: str
     private_key: bytes
 
 
-def load_github_app_credentials() -> GitHubAppCredentials:
+def _load_private_key() -> bytes:
     """
-    Carrega o App ID e a chave privada do GitHub App
-    a partir das configurações do ambiente.
+    Carrega a chave privada do GitHub App.
+
+    Produção:
+        GITHUB_APP_PRIVATE_KEY_B64
+
+    Desenvolvimento local:
+        GITHUB_APP_PRIVATE_KEY_PATH
+
+    A variável Base64 tem precedência para evitar dependência
+    de filesystem local no ambiente hospedado.
     """
 
-    app_id = os.getenv("GITHUB_APP_ID")
-    private_key_path = os.getenv("GITHUB_APP_PRIVATE_KEY_PATH")
+    private_key_b64 = os.getenv(
+        "GITHUB_APP_PRIVATE_KEY_B64"
+    )
+
+    if private_key_b64:
+        try:
+            return base64.b64decode(
+                private_key_b64,
+                validate=True,
+            )
+        except ValueError as exc:
+            raise RuntimeError(
+                "GITHUB_APP_PRIVATE_KEY_B64 is invalid."
+            ) from exc
+
+    private_key_path = os.getenv(
+        "GITHUB_APP_PRIVATE_KEY_PATH"
+    )
+
+    if private_key_path:
+        return Path(
+            private_key_path
+        ).read_bytes()
+
+    raise RuntimeError(
+        "GitHub App private key is not configured. "
+        "Set GITHUB_APP_PRIVATE_KEY_B64 or "
+        "GITHUB_APP_PRIVATE_KEY_PATH."
+    )
+
+
+def load_github_app_credentials() -> GitHubAppCredentials:
+    """
+    Carrega o App ID e a chave privada do GitHub App.
+    """
+
+    app_id = os.getenv(
+        "GITHUB_APP_ID"
+    )
 
     if not app_id:
         raise RuntimeError(
             "GITHUB_APP_ID environment variable is not available."
         )
 
-    if not private_key_path:
-        raise RuntimeError(
-            "GITHUB_APP_PRIVATE_KEY_PATH environment variable is not available."
-        )
-
-    private_key = Path(private_key_path).read_bytes()
-
     return GitHubAppCredentials(
         app_id=app_id,
-        private_key=private_key,
+        private_key=_load_private_key(),
     )
 
 
@@ -57,7 +96,7 @@ def generate_app_jwt(
     current_time: int,
 ) -> str:
     """
-    Gera o JWT usado para autenticar o GitHub App.
+    Gera o JWT utilizado para autenticar o GitHub App.
     """
 
     payload = {
@@ -78,9 +117,6 @@ def get_authenticated_app_slug(
 ) -> str:
     """
     Obtém o slug oficial do GitHub App autenticado.
-
-    O slug será usado para identificar com segurança
-    o comentário pertencente ao próprio bot.
     """
 
     request = Request(
@@ -101,7 +137,9 @@ def get_authenticated_app_slug(
             response.read().decode("utf-8")
         )
 
-    slug = response_body.get("slug")
+    slug = response_body.get(
+        "slug"
+    )
 
     if not slug:
         raise RuntimeError(
@@ -143,7 +181,9 @@ def create_installation_access_token(
             response.read().decode("utf-8")
         )
 
-    token = response_body.get("token")
+    token = response_body.get(
+        "token"
+    )
 
     if not token:
         raise RuntimeError(
