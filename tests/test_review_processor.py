@@ -63,6 +63,16 @@ def configure_common_mocks(
         lambda **kwargs: "complete fake diff",
     )
 
+    monkeypatch.setenv(
+        "OPENROUTER_API_KEY",
+        "fake-openrouter-key",
+    )
+
+    monkeypatch.setenv(
+        "OPENROUTER_MODEL",
+        "openrouter/free",
+    )
+
 
 def test_processes_all_diff_chunks_and_publishes_review(
     monkeypatch,
@@ -95,6 +105,8 @@ def test_processes_all_diff_chunks_and_publishes_review(
         groq_api_key,
         rules,
         diff,
+        openrouter_api_key=None,
+        openrouter_model=None,
     ):
         reviewed_chunks.append(
             diff

@@ -8,6 +8,7 @@ from providers.base import AIProviderUnavailableError
 from providers.fallback import FallbackProvider
 from providers.gemini import GeminiProvider
 from providers.groq import GroqProvider
+from providers.openrouter import OpenRouterProvider
 
 # Diff do Pull Request preparado pelo workflow.
 DIFF_PATH = Path("/tmp/pr.diff")
@@ -21,6 +22,7 @@ REVIEW_OUTPUT_PATH = Path("/tmp/ai-review.md")
 # Modelo utilizado pelo reviewer.
 GEMINI_MODEL = "gemini-3.8-flash"
 GROQ_MODEL = "openai/gpt-oss-120b"
+OPENROUTER_MODEL = "openrouter/free"
 
 REVIEW_MARKER = "<!-- ai-data-engineering-reviewer -->"
 
@@ -139,6 +141,8 @@ def generate_review(
     groq_api_key: str | None,
     rules: str,
     diff: str,
+    openrouter_api_key: str | None = None,
+    openrouter_model: str | None = None
 ) -> str:
     """
     Gera o review utilizando os providers de IA disponíveis.
@@ -171,6 +175,17 @@ def generate_review(
             GroqProvider(
                 api_key=groq_api_key,
                 model=GROQ_MODEL,
+            )
+        )
+
+    if openrouter_api_key:
+        providers.append(
+            OpenRouterProvider(
+                api_key=openrouter_api_key,
+                model=(
+                    openrouter_model
+                    or OPENROUTER_MODEL
+                ),
             )
         )
 
