@@ -196,11 +196,11 @@ def process_pull_request_event(
     )
 
     openrouter_api_key = os.getenv(
-    "OPENROUTER_API_KEY"
+        "OPENROUTER_API_KEY"
     )
 
     openrouter_model = os.getenv(
-    "OPENROUTER_MODEL"
+        "OPENROUTER_MODEL"
     )
 
     chunk_reviews: list[str] = []
