@@ -195,6 +195,14 @@ def process_pull_request_event(
         "GROQ_API_KEY"
     )
 
+    openrouter_api_key = os.getenv(
+        "OPENROUTER_API_KEY"
+    )
+
+    openrouter_model = os.getenv(
+        "OPENROUTER_MODEL"
+    )
+
     chunk_reviews: list[str] = []
 
     try:
@@ -214,6 +222,8 @@ def process_pull_request_event(
                 groq_api_key=groq_api_key,
                 rules=chunk_rules,
                 diff=chunk,
+                openrouter_api_key=openrouter_api_key,
+                openrouter_model=openrouter_model,
             )
 
             chunk_reviews.append(
