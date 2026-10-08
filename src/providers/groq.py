@@ -68,6 +68,14 @@ class GroqProvider(AIProvider):
             ) from None
 
         except APIStatusError as exc:
+            # HTTP 413 indica que a requisi??o excedeu o limite
+            # aceito pelo provider atual. Isso n?o deve encerrar
+            # toda a cadeia: o pr?ximo provider pode suport?-la.
+            if exc.status_code == 413:
+                raise AIProviderUnavailableError(
+                    "Groq cannot process the current request size."
+                ) from None
+
             raise RuntimeError(
                 "Groq review generation failed "
                 f"(HTTP {exc.status_code})."
