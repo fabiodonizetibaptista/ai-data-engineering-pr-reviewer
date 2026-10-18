@@ -1,0 +1,57 @@
+name: Engineering Quality Gate
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  python-static-analysis:
+    name: Python Static Analysis (Ruff)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Configure Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install Ruff
+        run: python -m pip install ruff==0.13.3
+
+      - name: Execute Ruff diagnostic
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Running Python static analysis..."
+
+          # Diagnostic mode: do not fail the PR on lint findings.
+          # Installation and execution errors still fail the job.
+          ruff check src tests \
+            --output-format concise \
+            --exit-zero
+
+          {
+            echo "## Engineering Quality Gate"
+            echo ""
+            echo "### Ruff — Python Static Analysis"
+            echo ""
+            echo "Mode: diagnostic (non-blocking)"
+            echo ""
+            echo '```text'
+            ruff check src tests \
+              --statistics \
+              --exit-zero
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          echo "Ruff diagnostic completed."
