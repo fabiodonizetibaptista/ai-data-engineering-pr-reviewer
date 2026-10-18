@@ -34,10 +34,19 @@ jobs:
 
           echo "Running Python static analysis..."
 
-          # Enforcement mode: lint violations fail the job.
-          # Keep the current default rules until further calibration.
-          ruff check src tests \
-            --output-format concise
+          # Capture the Ruff result without prematurely terminating
+          # the shell. This ensures diagnostics are still published
+          # when lint violations cause a non-zero exit code.
+          if ruff check src tests \
+              --output-format concise \
+              > "$RUNNER_TEMP/ruff-findings.txt" 2>&1; then
+            ruff_status=0
+          else
+            ruff_status=$?
+          fi
+
+          # Keep the original output visible in the job logs.
+          cat "$RUNNER_TEMP/ruff-findings.txt"
 
           {
             echo "## Engineering Quality Gate"
@@ -46,10 +55,17 @@ jobs:
             echo ""
             echo "Mode: enforcement (blocking)"
             echo ""
+            echo "Ruff exit code: $ruff_status"
+            echo ""
             echo '```text'
-            ruff check src tests \
-              --statistics
+
+            # Statistics are informational. The original exit code
+            # remains the authoritative outcome of this quality gate.
+            ruff check src tests --statistics --exit-zero ||
+              echo "Statistics unavailable."
+
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-          echo "Ruff enforcement completed."
+          # Fail the job when the initial Ruff execution failed.
+          exit "$ruff_status"
