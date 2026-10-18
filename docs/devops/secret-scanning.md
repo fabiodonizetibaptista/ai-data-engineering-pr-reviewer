@@ -70,3 +70,30 @@ invalidate an already exposed credential.
 - Controlled negative testing
 - Centralized scanner execution for external repositories
 - Correlation of deterministic evidence with AI findings
+## Binary integrity
+
+The workflow downloads both the Gitleaks release archive and
+the official checksum manifest from the same pinned release.
+
+Before extraction or execution, it:
+
+1. Locates the SHA-256 entry for the expected Linux artifact.
+2. Rejects missing, duplicate or malformed checksum entries.
+3. Calculates the SHA-256 of the downloaded archive.
+4. Fails installation if the checksums differ.
+
+Only verified archives are extracted.
+
+This verifies consistency with the upstream release manifest.
+It does not independently authenticate the publisher.
+
+## Diagnostic safety
+
+The scanner does not publish matching secrets, source lines
+or raw finding reports.
+
+A nonzero scanner exit code fails the workflow. Public
+diagnostics remain generic to avoid exposing sensitive data.
+
+Further diagnostics should use sanitized error categories
+rather than printing unfiltered scanner output.
