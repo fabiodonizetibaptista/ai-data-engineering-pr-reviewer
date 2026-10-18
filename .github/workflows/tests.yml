@@ -31,4 +31,17 @@ jobs:
           pip install -r requirements-dev.txt
 
       - name: Run test suite
-        run: python -m pytest -v
+        run: python -m pytest -v --cov=src --cov-report=term-missing
+
+      - name: Publish coverage summary
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "## Test Coverage"
+            echo ""
+            echo "Mode: measurement only (no minimum threshold yet)"
+            echo ""
+            python -m coverage report --format=markdown
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -27,31 +27,29 @@ jobs:
       - name: Install Ruff
         run: python -m pip install ruff==0.13.3
 
-      - name: Execute Ruff diagnostic
+      - name: Execute Ruff enforcement
         shell: bash
         run: |
           set -euo pipefail
 
           echo "Running Python static analysis..."
 
-          # Diagnostic mode: do not fail the PR on lint findings.
-          # Installation and execution errors still fail the job.
+          # Enforcement mode: lint violations fail the job.
+          # Keep the current default rules until further calibration.
           ruff check src tests \
-            --output-format concise \
-            --exit-zero
+            --output-format concise
 
           {
             echo "## Engineering Quality Gate"
             echo ""
-            echo "### Ruff — Python Static Analysis"
+            echo "### Ruff - Python Static Analysis"
             echo ""
-            echo "Mode: diagnostic (non-blocking)"
+            echo "Mode: enforcement (blocking)"
             echo ""
             echo '```text'
             ruff check src tests \
-              --statistics \
-              --exit-zero
+              --statistics
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-          echo "Ruff diagnostic completed."
+          echo "Ruff enforcement completed."
