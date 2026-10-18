@@ -27,31 +27,45 @@ jobs:
       - name: Install Ruff
         run: python -m pip install ruff==0.13.3
 
-      - name: Execute Ruff diagnostic
+      - name: Execute Ruff enforcement
         shell: bash
         run: |
           set -euo pipefail
 
           echo "Running Python static analysis..."
 
-          # Diagnostic mode: do not fail the PR on lint findings.
-          # Installation and execution errors still fail the job.
-          ruff check src tests \
-            --output-format concise \
-            --exit-zero
+          # Capture the Ruff result without prematurely terminating
+          # the shell. This ensures diagnostics are still published
+          # when lint violations cause a non-zero exit code.
+          if ruff check src tests \
+              --output-format concise \
+              > "$RUNNER_TEMP/ruff-findings.txt" 2>&1; then
+            ruff_status=0
+          else
+            ruff_status=$?
+          fi
+
+          # Keep the original output visible in the job logs.
+          cat "$RUNNER_TEMP/ruff-findings.txt"
 
           {
             echo "## Engineering Quality Gate"
             echo ""
-            echo "### Ruff — Python Static Analysis"
+            echo "### Ruff - Python Static Analysis"
             echo ""
-            echo "Mode: diagnostic (non-blocking)"
+            echo "Mode: enforcement (blocking)"
+            echo ""
+            echo "Ruff exit code: $ruff_status"
             echo ""
             echo '```text'
-            ruff check src tests \
-              --statistics \
-              --exit-zero
+
+            # Statistics are informational. The original exit code
+            # remains the authoritative outcome of this quality gate.
+            ruff check src tests --statistics --exit-zero ||
+              echo "Statistics unavailable."
+
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-          echo "Ruff diagnostic completed."
+          # Fail the job when the initial Ruff execution failed.
+          exit "$ruff_status"
