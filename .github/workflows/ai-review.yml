@@ -70,8 +70,15 @@ jobs:
           path: /tmp/ai-review.md
 
       - name: Show pull request context
+        env:
+          PR_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_BASE_BRANCH: ${{ github.event.pull_request.base.ref }}
+          PR_HEAD_BRANCH: ${{ github.event.pull_request.head.ref }}
         run: |
-          echo "Repository: ${{ github.repository }}"
-          echo "Pull Request: #${{ github.event.pull_request.number }}"
-          echo "Base branch: ${{ github.event.pull_request.base.ref }}"
-          echo "Head branch: ${{ github.event.pull_request.head.ref }}"
+          # GitHub expressions are resolved into environment variables
+          # before Bash executes, preventing script injection via PR metadata.
+          echo "Repository: $PR_REPOSITORY"
+          echo "Pull Request: #$PR_NUMBER"
+          echo "Base branch: $PR_BASE_BRANCH"
+          echo "Head branch: $PR_HEAD_BRANCH"
