@@ -69,3 +69,99 @@ jobs:
 
           # Fail the job when the initial Ruff execution failed.
           exit "$ruff_status"
+  workflow-validation:
+    name: Workflow Validation (actionlint + ShellCheck)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install verified actionlint
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          VERSION="1.7.12"
+          ASSET="actionlint_${VERSION}_linux_amd64.tar.gz"
+          ARCHIVE="$RUNNER_TEMP/$ASSET"
+          INSTALL_DIR="$RUNNER_TEMP/actionlint-bin"
+
+          mkdir -p "$INSTALL_DIR"
+
+          curl --proto '=https' --proto-redir '=https' \
+            --fail --silent --show-error \
+            --location --retry 3 \
+            "https://github.com/rhysd/actionlint/releases/download/v${VERSION}/${ASSET}" \
+            --output "$ARCHIVE"
+
+          # SHA-256 from the official v1.7.12 release.
+          EXPECTED_SHA256="8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
+
+          printf '%s  %s\n' "$EXPECTED_SHA256" "$ARCHIVE" |
+            sha256sum --check --status
+
+          tar -xzf "$ARCHIVE" -C "$INSTALL_DIR" actionlint
+          chmod +x "$INSTALL_DIR/actionlint"
+
+          echo "$INSTALL_DIR" >> "$GITHUB_PATH"
+          echo "actionlint binary integrity verified."
+
+      - name: Verify ShellCheck availability
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          command -v shellcheck > /dev/null ||
+            { echo "ShellCheck unavailable."; exit 1; }
+
+          echo "ShellCheck available."
+
+      - name: Validate workflow and shell syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # actionlint discovers workflows under .github/workflows.
+          # ShellCheck is explicitly enabled for embedded Bash scripts.
+          actionlint -shellcheck="$(command -v shellcheck)"
+
+          echo "GitHub Actions workflows validated."
+
+      - name: Negative regression test
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          TEST_FILE="$RUNNER_TEMP/invalid-workflow.yml"
+          trap 'rm -f "$TEST_FILE"' EXIT
+
+          # Reproduces the original failure pattern:
+          # an if command accidentally appended to a comment.
+          cat > "$TEST_FILE" <<'YAML'
+          name: Negative Syntax Test
+          on: push
+          jobs:
+            invalid-shell:
+              runs-on: ubuntu-latest
+              steps:
+                - shell: bash
+                  run: |
+                    # Comment accidentally consumes the if statement. if true; then
+                      echo "unreachable"
+                    fi
+          YAML
+
+          # The negative test passes only when actionlint rejects
+          # the deliberately invalid embedded Bash script.
+          if actionlint \
+              -shellcheck="$(command -v shellcheck)" \
+              "$TEST_FILE" > /dev/null 2>&1; then
+            echo "FAIL: invalid workflow was accepted."
+            exit 1
+          fi
+
+          echo "PASS: invalid embedded Bash rejected."
