@@ -1,7 +1,10 @@
+import pytest
+
 from github_app.authentication import GitHubAppCredentials
 from github_app.diff_chunking import DiffChunkPlan
 from github_app.events import PullRequestEvent
 from github_app.processor import process_pull_request_event
+from github_app.review_result import ReviewResult
 from providers.base import AIProviderUnavailableError
 
 
@@ -153,7 +156,7 @@ def test_processes_all_diff_chunks_and_publishes_review(
         event
     )
 
-    assert result is True
+    assert result == ReviewResult("complete", True, 2, 2, "none")
 
     assert reviewed_chunks == [
         "chunk one",
@@ -222,7 +225,7 @@ def test_does_not_publish_when_ai_providers_are_unavailable(
         event
     )
 
-    assert result is False
+    assert result == ReviewResult("failed", False, 0, 1, "providers_unavailable")
     assert published["value"] is False
 
 def test_publishes_explicit_partial_review_after_provider_failure(monkeypatch, tmp_path):
@@ -250,8 +253,66 @@ def test_publishes_explicit_partial_review_after_provider_failure(monkeypatch, t
         action="synchronize", pull_request_number=4,
         repository_full_name="owner/repo", installation_id=123,
     )
-    assert process_pull_request_event(event) is True
+    assert process_pull_request_event(event) == ReviewResult("partial", True, 1, 3, "providers_unavailable")
     assert calls == ["one", "two"]
     assert len(published) == 1
     assert "INCOMPLETE REVIEW" in published[0]
     assert "1 of 3" in published[0]
+
+
+
+
+@pytest.mark.parametrize(
+    ("completed", "total", "omitted", "reason"),
+    [
+        (8, 22, 14, "chunk_limit"),
+        (5, 22, 14, "time_budget_exceeded"),
+    ],
+)
+def test_classifies_chunk_limit_and_time_budget(
+    monkeypatch, tmp_path, completed, total, omitted, reason
+):
+    from github_app import processor
+
+    configure_common_mocks(monkeypatch, tmp_path)
+
+    plan = DiffChunkPlan(
+        chunks=tuple(f"chunk-{i}" for i in range(1, 9)),
+        total_chunks=total,
+        omitted_chunks=omitted,
+        omitted_bytes=1000,
+    )
+    monkeypatch.setattr(processor, "chunk_pull_request_diff", lambda diff: plan)
+
+    calls = []
+    monkeypatch.setattr(
+        processor,
+        "generate_review",
+        lambda **kwargs: calls.append(kwargs["diff"]) or "Valid review",
+    )
+    monkeypatch.setattr(
+        processor,
+        "publish_or_update_pull_request_comment",
+        lambda **kwargs: 123,
+    )
+
+    if reason == "time_budget_exceeded":
+        ticks = iter([0.0] + [0.0] * completed + [181.0])
+        monkeypatch.setattr(
+            processor.time, "monotonic", lambda: next(ticks, 181.0)
+        )
+
+    event = PullRequestEvent(
+        action="synchronize",
+        pull_request_number=4,
+        repository_full_name="owner/repo",
+        installation_id=123,
+    )
+    outcome = processor.process_pull_request_event(event)
+
+    assert outcome.status == "partial"
+    assert outcome.published is True
+    assert outcome.completed_chunks == completed
+    assert outcome.total_chunks == total
+    assert outcome.reason == reason
+    assert len(calls) == completed
