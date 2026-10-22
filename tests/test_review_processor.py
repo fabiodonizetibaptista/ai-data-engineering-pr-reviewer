@@ -107,6 +107,7 @@ def test_processes_all_diff_chunks_and_publishes_review(
         diff,
         openrouter_api_key=None,
         openrouter_model=None,
+        unavailable_providers=None,
     ):
         reviewed_chunks.append(
             diff
@@ -223,3 +224,34 @@ def test_does_not_publish_when_ai_providers_are_unavailable(
 
     assert result is False
     assert published["value"] is False
+
+def test_publishes_explicit_partial_review_after_provider_failure(monkeypatch, tmp_path):
+    configure_common_mocks(monkeypatch, tmp_path)
+    plan = DiffChunkPlan(
+        chunks=("one", "two", "three"),
+        total_chunks=3, omitted_chunks=0, omitted_bytes=0,
+    )
+    monkeypatch.setattr(
+        "github_app.processor.chunk_pull_request_diff", lambda diff: plan,
+    )
+    calls = []
+    def fake_review(**kwargs):
+        calls.append(kwargs["diff"])
+        if len(calls) == 2:
+            raise AIProviderUnavailableError("unavailable")
+        return "# AI Data Engineering Review\n\nFirst chunk review"
+    monkeypatch.setattr("github_app.processor.generate_review", fake_review)
+    published = []
+    monkeypatch.setattr(
+        "github_app.processor.publish_or_update_pull_request_comment",
+        lambda **kwargs: published.append(kwargs["review"]),
+    )
+    event = PullRequestEvent(
+        action="synchronize", pull_request_number=4,
+        repository_full_name="owner/repo", installation_id=123,
+    )
+    assert process_pull_request_event(event) is True
+    assert calls == ["one", "two"]
+    assert len(published) == 1
+    assert "INCOMPLETE REVIEW" in published[0]
+    assert "1 of 3" in published[0]

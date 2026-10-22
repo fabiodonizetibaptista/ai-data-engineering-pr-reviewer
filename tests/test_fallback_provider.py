@@ -198,3 +198,15 @@ def test_does_not_fallback_on_non_transient_error():
 
     assert primary.call_count == 1
     assert fallback.call_count == 0
+
+def test_shared_unavailability_skips_provider_in_next_chunk():
+    dead = UnavailableProvider("dead")
+    healthy = FakeProvider("healthy", "review")
+    excluded = set()
+    first = FallbackProvider([dead, healthy], unavailable_providers=excluded)
+    assert first.generate_review("chunk 1") == "review"
+    second = FallbackProvider([dead, healthy], unavailable_providers=excluded)
+    assert second.generate_review("chunk 2") == "review"
+    assert dead.call_count == 1
+    assert healthy.call_count == 2
+    assert excluded == {"dead"}

@@ -24,6 +24,10 @@ from reviewer import generate_review
 
 logger = logging.getLogger("uvicorn.error")
 
+# Checked between chunks. Does NOT interrupt an ongoing provider HTTP request.
+MAX_REVIEW_SECONDS = 180
+
+
 
 RULES_PATH = (
     Path(__file__).resolve().parents[2]
@@ -109,21 +113,23 @@ def combine_chunk_reviews(
             "At least one chunk review is required."
         )
 
-    if len(reviews) == 1 and not plan.is_partial:
+    reviewed_count = len(reviews)
+    incomplete = reviewed_count < plan.total_chunks
+
+    if reviewed_count == 1 and not incomplete:
         return reviews[0]
 
-    reviewed_count = len(reviews)
-
-    if plan.is_partial:
+    if incomplete:
         coverage_message = (
-            f"> Review coverage: {reviewed_count} of "
-            f"{plan.total_chunks} generated chunks were analyzed. "
-            f"{plan.omitted_chunks} chunk(s) were omitted due to "
-            "the configured execution budget."
+            f"> **INCOMPLETE REVIEW**: {reviewed_count} of "
+            f"{plan.total_chunks} generated chunks were analyzed; "
+            f"{plan.total_chunks - reviewed_count} chunk(s) were not reviewed "
+            "due to execution budget or provider availability. "
+            "Do not treat this as a full pull request review."
         )
     else:
         coverage_message = (
-            f"> Review coverage: the pull request was analyzed "
+            "> Review coverage: the pull request was analyzed "
             f"in {reviewed_count} chunks."
         )
 
@@ -232,12 +238,32 @@ def process_pull_request_event(
     )
 
     chunk_reviews: list[str] = []
+    unavailable_providers: set[str] = set()
+    started_at = time.monotonic()
 
     try:
         for index, chunk in enumerate(
             plan.chunks,
             start=1,
         ):
+            if time.monotonic() - started_at >= MAX_REVIEW_SECONDS:
+                logger.warning(
+                    "review.chunk status=budget_exceeded repo=%s pr=%s "
+                    "completed=%s total=%s",
+                    event.repository_full_name,
+                    event.pull_request_number,
+                    len(chunk_reviews),
+                    len(plan.chunks),
+                )
+                break
+
+            logger.info(
+                "review.chunk status=started repo=%s pr=%s chunk=%s total=%s",
+                event.repository_full_name,
+                event.pull_request_number,
+                index,
+                len(plan.chunks),
+            )
             chunk_rules = _build_chunk_rules(
                 rules=rules,
                 chunk_number=index,
@@ -252,13 +278,29 @@ def process_pull_request_event(
                 diff=chunk,
                 openrouter_api_key=openrouter_api_key,
                 openrouter_model=openrouter_model,
+                unavailable_providers=unavailable_providers,
             )
 
-            chunk_reviews.append(
-                review
+            chunk_reviews.append(review)
+            logger.info(
+                "review.chunk status=completed repo=%s pr=%s chunk=%s total=%s",
+                event.repository_full_name,
+                event.pull_request_number,
+                index,
+                len(plan.chunks),
             )
 
     except AIProviderUnavailableError:
+        logger.warning(
+            "review.chunk status=providers_unavailable repo=%s pr=%s "
+            "completed=%s total=%s",
+            event.repository_full_name,
+            event.pull_request_number,
+            len(chunk_reviews),
+            len(plan.chunks),
+        )
+
+    if not chunk_reviews:
         return False
 
     final_review = combine_chunk_reviews(

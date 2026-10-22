@@ -16,6 +16,7 @@ class FallbackProvider(AIProvider):
     def __init__(
         self,
         providers: list[AIProvider],
+        unavailable_providers: set[str] | None = None,
     ) -> None:
         if not providers:
             raise ValueError(
@@ -23,6 +24,10 @@ class FallbackProvider(AIProvider):
             )
 
         self._providers = providers
+        # Shared only inside one PR review; not global across requests.
+        self._unavailable_providers = (
+            unavailable_providers if unavailable_providers is not None else set()
+        )
 
     @property
     def name(self) -> str:
@@ -38,6 +43,8 @@ class FallbackProvider(AIProvider):
         unavailable_providers = []
 
         for provider in self._providers:
+            if provider.name in self._unavailable_providers:
+                continue
             try:
                 print(
                     f"Trying AI provider: {provider.name}"
@@ -53,6 +60,7 @@ class FallbackProvider(AIProvider):
 
             except AIProviderUnavailableError:
                 unavailable_providers.append(provider.name)
+                self._unavailable_providers.add(provider.name)
 
                 print(
                     f"AI provider unavailable: {provider.name}. "

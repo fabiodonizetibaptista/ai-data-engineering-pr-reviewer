@@ -142,14 +142,13 @@ def generate_review(
     rules: str,
     diff: str,
     openrouter_api_key: str | None = None,
-    openrouter_model: str | None = None
+    openrouter_model: str | None = None,
+    unavailable_providers: set[str] | None = None,
 ) -> str:
     """
     Gera o review utilizando os providers de IA disponíveis.
 
-    A ordem da lista define a prioridade:
-    1. Gemini
-    2. Groq
+    A ordem define a prioridade: Groq, OpenRouter e Gemini.
 
     Se o provider principal estiver temporariamente indisponível,
     o FallbackProvider tenta automaticamente o próximo.
@@ -161,14 +160,6 @@ def generate_review(
     )
 
     providers = []
-
-    if gemini_api_key:
-        providers.append(
-            GeminiProvider(
-                api_key=gemini_api_key,
-                model=GEMINI_MODEL,
-            )
-        )
 
     if groq_api_key:
         providers.append(
@@ -189,6 +180,14 @@ def generate_review(
             )
         )
 
+    if gemini_api_key:
+        providers.append(
+            GeminiProvider(
+                api_key=gemini_api_key,
+                model=GEMINI_MODEL,
+            )
+        )
+
     if not providers:
         raise RuntimeError(
             "No AI provider API key is available."
@@ -196,6 +195,7 @@ def generate_review(
 
     provider = FallbackProvider(
         providers=providers,
+        unavailable_providers=unavailable_providers,
     )
 
     return provider.generate_review(prompt)

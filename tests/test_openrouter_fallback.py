@@ -54,14 +54,14 @@ class FakeSuccessfulProvider:
         return "OpenRouter review succeeded."
 
 
-def test_falls_back_from_gemini_to_groq_to_openrouter(
+def test_falls_back_from_groq_to_openrouter_before_gemini(
     monkeypatch,
 ):
     calls = []
 
     monkeypatch.setattr(
         "reviewer.GeminiProvider",
-        lambda **kwargs: FakeUnavailableProvider(
+        lambda **kwargs: FakeSuccessfulProvider(
             "gemini",
             calls,
         ),
@@ -77,7 +77,7 @@ def test_falls_back_from_gemini_to_groq_to_openrouter(
 
     monkeypatch.setattr(
         "reviewer.OpenRouterProvider",
-        lambda **kwargs: FakeSuccessfulProvider(
+        lambda **kwargs: FakeUnavailableProvider(
             "openrouter",
             calls,
         ),
@@ -97,7 +97,27 @@ def test_falls_back_from_gemini_to_groq_to_openrouter(
     )
 
     assert calls == [
-        "gemini",
         "groq",
         "openrouter",
+        "gemini",
     ]
+
+def test_groq_success_skips_other_providers(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        "reviewer.GroqProvider",
+        lambda **kwargs: FakeSuccessfulProvider("groq", calls),
+    )
+    monkeypatch.setattr(
+        "reviewer.OpenRouterProvider",
+        lambda **kwargs: FakeSuccessfulProvider("openrouter", calls),
+    )
+    monkeypatch.setattr(
+        "reviewer.GeminiProvider",
+        lambda **kwargs: FakeSuccessfulProvider("gemini", calls),
+    )
+    generate_review(
+        gemini_api_key="fake", groq_api_key="fake", openrouter_api_key="fake",
+        rules="rules", diff="diff",
+    )
+    assert calls == ["groq"]
