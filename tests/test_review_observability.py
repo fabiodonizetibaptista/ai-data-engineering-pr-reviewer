@@ -4,13 +4,15 @@ from unittest.mock import Mock
 import pytest
 
 from github_app import background
+from github_app.review_result import ReviewResult
 
 
 @pytest.mark.parametrize(
     ("processor_result", "expected_status"),
     [
-        (True, "status=success"),
-        (False, "status=providers_unavailable"),
+        (ReviewResult("complete", True, 2, 2, "none"), "status=complete"),
+        (ReviewResult("partial", True, 1, 2, "time_budget_exceeded"), "status=partial"),
+        (ReviewResult("failed", False, 0, 2, "providers_unavailable"), "status=failed"),
     ],
 )
 def test_review_lifecycle_result_logging(

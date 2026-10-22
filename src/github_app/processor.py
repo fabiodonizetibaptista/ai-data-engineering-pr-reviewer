@@ -14,6 +14,7 @@ from github_app.diff_chunking import (
     chunk_pull_request_diff,
 )
 from github_app.events import PullRequestEvent
+from github_app.review_result import ReviewResult
 from github_app.github_client import (
     get_pull_request_diff,
     publish_or_update_pull_request_comment,
@@ -159,7 +160,7 @@ def combine_chunk_reviews(
 
 def process_pull_request_event(
     event: PullRequestEvent,
-) -> bool:
+) -> ReviewResult:
     """
     Executa o pipeline completo de análise do pull request.
     """
@@ -240,6 +241,7 @@ def process_pull_request_event(
     chunk_reviews: list[str] = []
     unavailable_providers: set[str] = set()
     started_at = time.monotonic()
+    stop_reason = "none"
 
     try:
         for index, chunk in enumerate(
@@ -255,6 +257,7 @@ def process_pull_request_event(
                     len(chunk_reviews),
                     len(plan.chunks),
                 )
+                stop_reason = "time_budget_exceeded"
                 break
 
             logger.info(
@@ -291,6 +294,7 @@ def process_pull_request_event(
             )
 
     except AIProviderUnavailableError:
+        stop_reason = "providers_unavailable"
         logger.warning(
             "review.chunk status=providers_unavailable repo=%s pr=%s "
             "completed=%s total=%s",
@@ -301,7 +305,22 @@ def process_pull_request_event(
         )
 
     if not chunk_reviews:
-        return False
+        outcome = ReviewResult(
+            status="failed",
+            published=False,
+            completed_chunks=0,
+            total_chunks=plan.total_chunks,
+            reason=stop_reason if stop_reason != "none" else "no_review_generated",
+        )
+        logger.info(
+            "review.outcome status=%s published=%s completed_chunks=%s "
+            "total_chunks=%s coverage_pct=%.2f reason=%s repo=%s pr=%s",
+            outcome.status, str(outcome.published).lower(),
+            outcome.completed_chunks, outcome.total_chunks,
+            outcome.coverage_pct, outcome.reason,
+            event.repository_full_name, event.pull_request_number,
+        )
+        return outcome
 
     final_review = combine_chunk_reviews(
         reviews=chunk_reviews,
@@ -322,4 +341,26 @@ def process_pull_request_event(
         bot_login=bot_login,
     )
 
-    return True
+    completed = len(chunk_reviews)
+    complete = completed == plan.total_chunks
+
+    if not complete and stop_reason == "none":
+        stop_reason = "chunk_limit" if plan.omitted_chunks else "incomplete"
+
+    outcome = ReviewResult(
+        status="complete" if complete else "partial",
+        published=True,
+        completed_chunks=completed,
+        total_chunks=plan.total_chunks,
+        reason=stop_reason,
+    )
+
+    logger.info(
+        "review.outcome status=%s published=%s completed_chunks=%s "
+        "total_chunks=%s coverage_pct=%.2f reason=%s repo=%s pr=%s",
+        outcome.status, str(outcome.published).lower(),
+        outcome.completed_chunks, outcome.total_chunks,
+        outcome.coverage_pct, outcome.reason,
+        event.repository_full_name, event.pull_request_number,
+    )
+    return outcome

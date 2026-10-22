@@ -4,6 +4,7 @@ from github_app.background import (
     run_pull_request_review_safely,
 )
 from github_app.events import PullRequestEvent
+from github_app.review_result import ReviewResult
 
 
 def build_event() -> PullRequestEvent:
@@ -21,7 +22,7 @@ def test_background_processing_completes_successfully(
 ):
     monkeypatch.setattr(
         "github_app.background.process_pull_request_event",
-        lambda event: True,
+        lambda event: ReviewResult("complete", True, 1, 1, "none"),
     )
 
     with caplog.at_level(logging.INFO):
@@ -32,7 +33,7 @@ def test_background_processing_completes_successfully(
     assert result is None
 
     assert (
-        "AI pull request review completed successfully."
+        "review.finished status=complete"
         in caplog.text
     )
 
@@ -43,7 +44,7 @@ def test_background_processing_handles_provider_unavailability(
 ):
     monkeypatch.setattr(
         "github_app.background.process_pull_request_event",
-        lambda event: False,
+        lambda event: ReviewResult("failed", False, 0, 1, "providers_unavailable"),
     )
 
     with caplog.at_level(logging.WARNING):
@@ -54,7 +55,7 @@ def test_background_processing_handles_provider_unavailability(
     assert result is None
 
     assert (
-        "AI pull request review was not published"
+        "review.finished status=failed"
         in caplog.text
     )
 
