@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 
 from fastapi import (
@@ -18,6 +19,9 @@ app = FastAPI(
     title="AI Data Engineering PR Reviewer",
     version="0.1.0",
 )
+
+
+logger = logging.getLogger("uvicorn.error")
 
 
 SUPPORTED_PULL_REQUEST_ACTIONS = {
@@ -114,6 +118,12 @@ async def receive_webhook(
             status_code=400,
             detail="Invalid pull request payload.",
         )
+
+    logger.info(
+        "review.accepted repo=%s pr=%s",
+        event.repository_full_name,
+        event.pull_request_number,
+    )
 
     background_tasks.add_task(
         run_pull_request_review_safely,
