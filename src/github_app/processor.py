@@ -1,3 +1,4 @@
+import logging
 import os
 import time
 from pathlib import Path
@@ -19,6 +20,9 @@ from github_app.github_client import (
 )
 from providers.base import AIProviderUnavailableError
 from reviewer import generate_review
+
+
+logger = logging.getLogger("uvicorn.error")
 
 
 RULES_PATH = (
@@ -154,6 +158,12 @@ def process_pull_request_event(
     Executa o pipeline completo de análise do pull request.
     """
 
+    logger.info(
+        "review.stage stage=authentication repo=%s pr=%s",
+        event.repository_full_name,
+        event.pull_request_number,
+    )
+
     credentials = load_github_app_credentials()
 
     app_jwt = generate_app_jwt(
@@ -173,10 +183,22 @@ def process_pull_request_event(
         installation_id=event.installation_id,
     )
 
+    logger.info(
+        "review.stage stage=fetch_diff repo=%s pr=%s",
+        event.repository_full_name,
+        event.pull_request_number,
+    )
+
     diff = get_pull_request_diff(
         installation_token=installation_token,
         repository_full_name=event.repository_full_name,
         pull_request_number=event.pull_request_number,
+    )
+
+    logger.info(
+        "review.stage stage=chunk_diff repo=%s pr=%s",
+        event.repository_full_name,
+        event.pull_request_number,
     )
 
     plan = chunk_pull_request_diff(
@@ -201,6 +223,12 @@ def process_pull_request_event(
 
     openrouter_model = os.getenv(
         "OPENROUTER_MODEL"
+    )
+
+    logger.info(
+        "review.stage stage=generate_review repo=%s pr=%s",
+        event.repository_full_name,
+        event.pull_request_number,
     )
 
     chunk_reviews: list[str] = []
@@ -236,6 +264,12 @@ def process_pull_request_event(
     final_review = combine_chunk_reviews(
         reviews=chunk_reviews,
         plan=plan,
+    )
+
+    logger.info(
+        "review.stage stage=publish_comment repo=%s pr=%s",
+        event.repository_full_name,
+        event.pull_request_number,
     )
 
     publish_or_update_pull_request_comment(
