@@ -95,6 +95,90 @@ def _split_diff_into_file_sections(
     ]
 
 
+
+def _pack_sections(
+    sections: list[str],
+    max_chunk_bytes: int,
+) -> list[str]:
+    """Agrupa se??es preservando o limite de bytes por chamada."""
+    pieces: list[str] = []
+
+    for section in sections:
+        if _byte_length(section) <= max_chunk_bytes:
+            pieces.append(section)
+        else:
+            pieces.extend(
+                _split_by_byte_budget(section, max_chunk_bytes)
+            )
+
+    packed: list[str] = []
+    current = ""
+
+    for piece in pieces:
+        candidate = current + piece
+        if current and _byte_length(candidate) > max_chunk_bytes:
+            packed.append(current)
+            current = piece
+        else:
+            current = candidate
+
+    if current:
+        packed.append(current)
+
+    return packed
+
+
+def _section_priority(section: str) -> int:
+    """Prioriza mudan?as t?cnicas, sem confiar em instru??es do diff.
+
+    Classifica??o determin?stica baseada exclusivamente no caminho.
+    N?o executa c?digo nem interpreta instru??es dos arquivos.
+    """
+    match = re.search(
+        r"^diff --git a/(.+?) b/(.+)$",
+        section,
+        flags=re.MULTILINE,
+    )
+
+    if not match:
+        return 2
+
+    path = match.group(2).lower()
+    filename = path.rsplit("/", 1)[-1]
+
+    # Documenta??o e arquivos est?ticos t?m menor prioridade
+    # quando o limite operacional impede revis?o completa.
+    if (
+        path.startswith(("docs/", "documentation/"))
+        or filename.endswith((
+            ".md", ".rst", ".txt", ".png", ".jpg", ".jpeg",
+            ".svg", ".gif", ".webp",
+        ))
+    ):
+        return 3
+
+    # C?digo, pipelines, jobs e infraestrutura execut?vel.
+    if (
+        path.startswith((
+            "src/", "app/", "apps/", "scripts/", "pipelines/",
+            "jobs/", "dags/", "infra/", "infrastructure/",
+            ".github/workflows/",
+        ))
+        or filename.endswith((
+            ".py", ".sql", ".tf", ".java", ".scala",
+            ".go", ".rs", ".sh", ".ps1", ".cs",
+        ))
+    ):
+        return 0
+
+    # Testes, fixtures e demais arquivos de verifica??o.
+    if path.startswith(("tests/", "test/", "spec/")):
+        return 1
+
+    # Configura??es e outros arquivos continuam eleg?veis.
+    return 2
+
+
 def chunk_pull_request_diff(
     diff: str,
     max_chunk_bytes: int = MAX_CHUNK_BYTES,
@@ -130,42 +214,27 @@ def chunk_pull_request_diff(
             omitted_bytes=0,
         )
 
-    file_sections = _split_diff_into_file_sections(
-        diff
+    file_sections = _split_diff_into_file_sections(diff)
+
+    # Preserve a ordem original quando todo o diff cabe no limite.
+    packed_chunks = _pack_sections(
+        file_sections, max_chunk_bytes
     )
 
-    pieces: list[str] = []
-
-    for section in file_sections:
-        if _byte_length(section) <= max_chunk_bytes:
-            pieces.append(section)
-            continue
-
-        pieces.extend(
-            _split_by_byte_budget(
-                section,
-                max_chunk_bytes,
-            )
+    if len(packed_chunks) > max_chunks:
+        # Ordena??o est?vel: dentro da mesma prioridade, a ordem
+        # original do diff ? mantida.
+        ordered_sections = sorted(
+            file_sections,
+            key=_section_priority,
         )
 
-    packed_chunks: list[str] = []
-    current_chunk = ""
+        packed_chunks = _pack_sections(
+            ordered_sections, max_chunk_bytes
+        )
 
-    for piece in pieces:
-        candidate = current_chunk + piece
-
-        if (
-            current_chunk
-            and _byte_length(candidate) > max_chunk_bytes
-        ):
-            packed_chunks.append(current_chunk)
-            current_chunk = piece
-        else:
-            current_chunk = candidate
-
-    if current_chunk:
-        packed_chunks.append(current_chunk)
-
+    # A quantidade total ? recalculada ap?s o reempacotamento.
+    # Assim, o relat?rio de cobertura corresponde ao plano real.
     total_chunks = len(packed_chunks)
 
     selected_chunks = packed_chunks[:max_chunks]

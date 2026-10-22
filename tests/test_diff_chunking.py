@@ -86,3 +86,55 @@ def test_marks_review_as_partial_when_chunk_limit_is_reached():
     assert plan.omitted_chunks > 0
     assert plan.omitted_bytes > 0
     assert plan.is_partial is True
+
+def test_prioritizes_code_when_review_is_limited():
+    # Documenta??o aparece primeiro no diff, mas o c?digo deve
+    # receber prioridade quando n?o h? or?amento para tudo.
+    docs_a = (
+        "diff --git a/docs/guide.md b/docs/guide.md\n"
+        + ("a" * 110)
+        + "\n"
+    )
+    docs_b = (
+        "diff --git a/docs/reference.md b/docs/reference.md\n"
+        + ("b" * 110)
+        + "\n"
+    )
+    code = (
+        "diff --git a/src/jobs/load.py b/src/jobs/load.py\n"
+        "+def load_data():\n"
+        "+    return True\n"
+    )
+
+    plan = chunk_pull_request_diff(
+        docs_a + docs_b + code,
+        max_chunk_bytes=160,
+        max_chunks=1,
+    )
+
+    assert len(plan.chunks) == 1
+    assert "src/jobs/load.py" in plan.chunks[0]
+    assert "docs/guide.md" not in plan.chunks[0]
+    assert plan.omitted_chunks > 0
+    assert plan.is_partial is True
+
+
+def test_keeps_original_order_when_review_is_complete():
+    docs = (
+        "diff --git a/docs/guide.md b/docs/guide.md\n"
+        "+Documentation updated\n"
+    )
+    code = (
+        "diff --git a/src/jobs/load.py b/src/jobs/load.py\n"
+        "+def load_data(): pass\n"
+    )
+
+    plan = chunk_pull_request_diff(
+        docs + code,
+        max_chunk_bytes=150,
+        max_chunks=8,
+    )
+
+    assert "".join(plan.chunks) == docs + code
+    assert plan.omitted_chunks == 0
+    assert plan.is_partial is False
